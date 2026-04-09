@@ -7,6 +7,10 @@ from app.models.task import Task, TaskRecord
 from app.models.attendance import Attendance, GpsWaypoint
 from app.models.expense import Expense
 from app.models.leave import Leave
+from app.models.activity_type import ActivityType
+from app.models.notification import Notification
+from app.models.audit_log import AuditLog
+from app.models.user_consent import UserConsent
 
 __all__ = [
     "User",
@@ -18,4 +22,8 @@ __all__ = [
     "Attendance", "GpsWaypoint",
     "Expense",
     "Leave",
+    "ActivityType",
+    "Notification",
+    "AuditLog",
+    "UserConsent",
 ]

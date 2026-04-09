@@ -6,6 +6,7 @@ from loguru import logger
 import sentry_sdk
 
 from app.core.config import settings
+from app.core.redis import close_redis
 from app.api.v1.router import api_router
 
 
@@ -13,6 +14,7 @@ from app.api.v1.router import api_router
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     yield
+    await close_redis()
     logger.info("Shutting down")
 
 
