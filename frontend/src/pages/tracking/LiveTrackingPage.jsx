@@ -4,6 +4,7 @@ import { Map, useMap } from '@vis.gl/react-google-maps'
 import GoogleMapProvider from '@/components/maps/GoogleMapProvider'
 import EmployeeMarker from '@/components/maps/EmployeeMarker'
 import NotificationBell from '@/features/notifications/NotificationBell'
+import DashboardShell from '@/components/layout/DashboardShell'
 import { useAuthStore } from '@/store/authStore'
 import useLiveTracking from '@/api/useLiveTracking'
 import { filterEmployees } from './utils/liveTrackingFilters'
@@ -207,18 +208,8 @@ export default function LiveTrackingPage() {
   )
 
   if (!allowed) {
-    return (
-      <div className="min-h-screen bg-surface flex items-center justify-center px-4">
-        <div className="bg-surface-container-lowest shadow-ghost p-6 text-center max-w-md">
-          <h1 className="text-2xl font-black font-headline text-on-surface">Access Restricted</h1>
-          <p className="text-on-surface-variant mt-2">Live tracking is available only for Owner and Manager roles.</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-surface text-on-surface">
+    <DashboardShell>
       <GeofenceBanner alerts={geofenceAlerts} />
 
       <div className="bg-surface-container-lowest border-b border-outline-variant/20 px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
@@ -316,6 +307,6 @@ export default function LiveTrackingPage() {
           </div>
         )}
       </div>
-    </div>
+    </DashboardShell>
   )
 }

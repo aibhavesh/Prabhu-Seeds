@@ -7,6 +7,7 @@ import {
   flexRender,
   createColumnHelper,
 } from '@tanstack/react-table'
+import DashboardShell from '@/components/layout/DashboardShell'
 import { useTasks } from './hooks/useTasks'
 import { useExportTasks } from './hooks/useExportTasks'
 import { useAuthStore } from '@/store/authStore'
@@ -294,8 +295,8 @@ export default function TasksPage() {
   })
 
   return (
-    <div className="min-h-screen bg-surface text-on-surface">
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+    <DashboardShell>
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Page header */}
         <div className="flex items-start justify-between">
           <div>
@@ -406,6 +407,7 @@ export default function TasksPage() {
         onReassign={() => setSelectedTask(null)}
         onUpdateStatus={() => setSelectedTask(null)}
       />
-    </div>
+      </div>
+    </DashboardShell>
   )
 }
