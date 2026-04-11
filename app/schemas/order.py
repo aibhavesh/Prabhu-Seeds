@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date as _Date, datetime
 from decimal import Decimal
 from pydantic import BaseModel, model_validator
 
@@ -23,7 +23,7 @@ class OrderItemOut(BaseModel):
 class OrderCreate(BaseModel):
     dealer_id: int
     items: list[OrderItemCreate]
-    date: date | None = None
+    date: _Date | None = None
 
 
 class OrderUpdate(BaseModel):
@@ -35,7 +35,7 @@ class OrderOut(BaseModel):
     id: str
     dealer_id: int | None
     created_by: uuid.UUID | None
-    date: date
+    date: _Date
     status: str
     paid: Decimal
     created_at: datetime

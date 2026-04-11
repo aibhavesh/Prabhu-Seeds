@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date as _Date, datetime
 from decimal import Decimal
 from pydantic import BaseModel
 
@@ -40,14 +40,14 @@ class TaskCreate(BaseModel):
     product: str | None = None
     target: int = 1
     unit: str = "NOS"
-    deadline: date | None = None
+    deadline: _Date | None = None
 
 
 class TaskUpdate(BaseModel):
     status: str | None = None  # running|hold|completed
     title: str | None = None
     target: int | None = None
-    deadline: date | None = None
+    deadline: _Date | None = None
 
 
 class TaskOut(BaseModel):
@@ -55,6 +55,7 @@ class TaskOut(BaseModel):
     title: str
     created_by: uuid.UUID | None
     assigned_to: uuid.UUID | None
+    assigned_to_name: str | None = None
     district_id: str | None
     dept: str | None
     activity_type: str | None
@@ -63,9 +64,21 @@ class TaskOut(BaseModel):
     target: int
     unit: str
     status: str
-    deadline: date | None
-    started_at: date | None
+    deadline: _Date | None
+    started_at: _Date | None
     created_at: datetime
     record_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class TaskMeta(BaseModel):
+    total: int
+    pending: int
+    active: int
+    efficiency: int
+
+
+class TaskListResponse(BaseModel):
+    tasks: list[TaskOut]
+    meta: TaskMeta

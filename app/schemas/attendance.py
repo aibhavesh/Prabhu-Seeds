@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date as _Date, datetime
 from decimal import Decimal
 from pydantic import BaseModel
 
@@ -38,7 +38,7 @@ class WaypointOut(BaseModel):
 class AttendanceOut(BaseModel):
     id: int
     user_id: uuid.UUID
-    date: date
+    date: _Date
     check_in: datetime | None
     check_out: datetime | None
     km: Decimal

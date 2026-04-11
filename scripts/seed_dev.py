@@ -8,8 +8,8 @@ Creates:
   - All 54 activity types
 
 Usage:
-    cd C:\Users\acer\Desktop\Prabhu-Seeds
-    venv\Scripts\activate
+    cd C:/Users/acer/Desktop/Prabhu-Seeds
+    venv/Scripts/activate
     python scripts/seed_dev.py
 """
 import asyncio

@@ -1,11 +1,11 @@
 import uuid
-from datetime import date, datetime
+from datetime import date as _Date, datetime
 from decimal import Decimal
 from pydantic import BaseModel
 
 
 class ExpenseCreate(BaseModel):
-    date: date
+    date: _Date
     type: str  # travel|hotel|food|other
     description: str | None = None
     amount: Decimal
@@ -21,7 +21,7 @@ class ExpenseUpdate(BaseModel):
 class ExpenseOut(BaseModel):
     id: int
     user_id: uuid.UUID
-    date: date
+    date: _Date
     type: str
     description: str | None
     amount: Decimal

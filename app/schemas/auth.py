@@ -8,7 +8,12 @@ class OTPSendRequest(BaseModel):
     @field_validator("mobile")
     @classmethod
     def validate_mobile(cls, v: str) -> str:
-        v = v.strip().lstrip("+91").lstrip("91")
+        v = v.strip()
+        # Strip country code prefix as a whole string, not char-by-char
+        if v.startswith("+91"):
+            v = v[3:]
+        elif v.startswith("91") and len(v) == 12:
+            v = v[2:]
         if not re.fullmatch(r"[6-9]\d{9}", v):
             raise ValueError("Invalid Indian mobile number")
         return v
@@ -21,7 +26,12 @@ class OTPVerifyRequest(BaseModel):
     @field_validator("mobile")
     @classmethod
     def validate_mobile(cls, v: str) -> str:
-        v = v.strip().lstrip("+91").lstrip("91")
+        v = v.strip()
+        # Strip country code prefix as a whole string, not char-by-char
+        if v.startswith("+91"):
+            v = v[3:]
+        elif v.startswith("91") and len(v) == 12:
+            v = v[2:]
         if not re.fullmatch(r"[6-9]\d{9}", v):
             raise ValueError("Invalid Indian mobile number")
         return v

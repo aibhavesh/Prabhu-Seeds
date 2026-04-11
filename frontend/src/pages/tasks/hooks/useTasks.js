@@ -21,21 +21,23 @@ export function useTasks(filters = {}) {
 }
 
 /** Activity type reference list for the Create Task form. */
-export function useActivityTypes() {
+export function useActivityTypes(options = {}) {
   return useQuery({
     queryKey: ['activity-types'],
     queryFn: () => apiClient.get('/api/v1/activity-types').then((r) => r.data),
     staleTime: 10 * 60 * 1000,
+    ...options,
   })
 }
 
 /** Field staff list for the Assigned To dropdown. */
-export function useFieldStaff() {
+export function useFieldStaff(options = {}) {
   return useQuery({
     queryKey: ['users', 'field'],
     queryFn: () =>
       apiClient.get('/api/v1/users', { params: { role: 'FIELD' } }).then((r) => r.data),
     staleTime: 5 * 60 * 1000,
+    ...options,
   })
 }
 

@@ -4,15 +4,18 @@ import io
 from datetime import date as date_type
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import joinedload
 
 from app.models.task import Task, TaskRecord
-from app.schemas.task import TaskCreate, TaskUpdate, TaskRecordCreate
+from app.schemas.task import TaskCreate, TaskUpdate, TaskRecordCreate, TaskOut, TaskMeta, TaskListResponse
 from app.services.visibility import get_subordinate_ids, can_see_task
 
 
 async def list_tasks(user: "User", db: AsyncSession, skip: int = 0, limit: int = 100) -> list[Task]:  # type: ignore[name-defined]
     sub_ids = await get_subordinate_ids(user.id, db)
-    result = await db.execute(select(Task).offset(skip).limit(limit))
+    result = await db.execute(
+        select(Task).options(joinedload(Task.assignee)).offset(skip).limit(limit)
+    )
     tasks = list(result.scalars().all())
 
     if user.role == "OWNER":
@@ -21,6 +24,28 @@ async def list_tasks(user: "User", db: AsyncSession, skip: int = 0, limit: int =
         t for t in tasks
         if can_see_task(t.created_by, t.assigned_to, user.id, user.role, sub_ids)
     ]
+
+
+async def list_tasks_with_meta(user: "User", db: AsyncSession, skip: int = 0, limit: int = 100) -> TaskListResponse:  # type: ignore[name-defined]
+    tasks = await list_tasks(user, db, skip=skip, limit=limit)
+
+    task_outs = []
+    for t in tasks:
+        out = TaskOut.model_validate(t)
+        if t.assignee:
+            out = out.model_copy(update={"assigned_to_name": t.assignee.name})
+        task_outs.append(out)
+
+    total = len(task_outs)
+    pending = sum(1 for t in task_outs if t.status == "assigned")
+    active = sum(1 for t in task_outs if t.status == "running")
+    completed = sum(1 for t in task_outs if t.status == "completed")
+    efficiency = round(completed / total * 100) if total > 0 else 0
+
+    return TaskListResponse(
+        tasks=task_outs,
+        meta=TaskMeta(total=total, pending=pending, active=active, efficiency=efficiency),
+    )
 
 
 async def create_task(data: TaskCreate, created_by: uuid.UUID, db: AsyncSession) -> Task:

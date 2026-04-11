@@ -5,20 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskUpdate, TaskOut, TaskRecordCreate, TaskRecordOut
+from app.schemas.task import TaskCreate, TaskUpdate, TaskOut, TaskRecordCreate, TaskRecordOut, TaskListResponse
 from app.services import task_service
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[TaskOut])
+@router.get("/", response_model=TaskListResponse)
 async def list_tasks(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
-) -> list:
-    return await task_service.list_tasks(current_user, db, skip=skip, limit=limit)
+) -> TaskListResponse:
+    return await task_service.list_tasks_with_meta(current_user, db, skip=skip, limit=limit)
 
 
 @router.post("/", response_model=TaskOut, status_code=status.HTTP_201_CREATED)

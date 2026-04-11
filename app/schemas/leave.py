@@ -1,11 +1,11 @@
 import uuid
-from datetime import date, datetime
+from datetime import date as _Date, datetime
 from pydantic import BaseModel
 
 
 class LeaveCreate(BaseModel):
-    from_date: date
-    to_date: date
+    from_date: _Date
+    to_date: _Date
     type: str  # casual|sick|earned|unpaid
     reason: str | None = None
 
@@ -17,8 +17,8 @@ class LeaveUpdate(BaseModel):
 class LeaveOut(BaseModel):
     id: int
     user_id: uuid.UUID
-    from_date: date
-    to_date: date
+    from_date: _Date
+    to_date: _Date
     type: str
     reason: str | None
     status: str

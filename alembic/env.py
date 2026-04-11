@@ -3,7 +3,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 
@@ -15,8 +15,10 @@ from app.core.config import settings
 # Alembic Config object (access to alembic.ini values)
 config = context.config
 
-# Override sqlalchemy.url with the value from .env so we never hardcode credentials
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# NOTE: We do NOT call config.set_main_option("sqlalchemy.url", ...) here because
+# configparser treats % as an interpolation character and will reject URLs that
+# contain %-encoded characters (e.g. %40 for @). We pass the URL directly to
+# create_async_engine instead.
 
 # Set up Python logging from alembic.ini
 if config.config_file_name is not None:
@@ -31,9 +33,8 @@ def run_migrations_offline() -> None:
     Run migrations in 'offline' mode — generates SQL script without connecting.
     Useful for reviewing SQL before applying, or for DBAs who apply SQL manually.
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=settings.DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -47,8 +48,8 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        compare_type=True,       # detect column type changes
-        compare_server_default=True,  # detect server default changes
+        compare_type=True,
+        compare_server_default=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -56,10 +57,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations using an async engine (required for asyncpg driver)."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,  # no pooling during migrations
+    # Create the engine directly from settings — bypasses configparser interpolation
+    connectable = create_async_engine(
+        settings.DATABASE_URL,
+        poolclass=pool.NullPool,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

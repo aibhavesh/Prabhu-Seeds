@@ -1,6 +1,6 @@
 import uuid
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -18,8 +18,9 @@ async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
+    role: str | None = Query(default=None, description="Filter by role (e.g. FIELD, MANAGER)"),
 ) -> list[User]:
-    return await user_service.list_users(db, skip=skip, limit=limit)
+    return await user_service.list_users(db, skip=skip, limit=limit, role=role)
 
 
 @router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
