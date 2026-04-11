@@ -44,11 +44,16 @@ async def verify_and_login(mobile: str, otp: str, db: AsyncSession) -> dict:
         return {"success": False, "message": "Account not found or disabled"}
 
     token = create_access_token(user)
+    role_lower = user.role.lower()  # frontend ROLE_ROUTES keys are lowercase
     return {
         "success": True,
+        "token": token,
         "access_token": token,
         "token_type": "bearer",
-        "user_id": str(user.id),
-        "role": user.role,
-        "name": user.name,
+        "user": {
+            "id": str(user.id),
+            "role": role_lower,
+            "name": user.name,
+            "mobile": user.mobile,
+        },
     }

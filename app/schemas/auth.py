@@ -27,9 +27,16 @@ class OTPVerifyRequest(BaseModel):
         return v
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user_id: str
-    role: str
+class UserInfo(BaseModel):
+    id: str
+    role: str   # lowercase: owner | manager | field | accounts
     name: str
+    mobile: str
+
+
+class TokenResponse(BaseModel):
+    """Shape expected by the React frontend authStore."""
+    token: str          # frontend reads data.token
+    access_token: str   # kept for API consumers / Swagger
+    token_type: str = "bearer"
+    user: UserInfo      # frontend reads data.user.role / data.user.name
