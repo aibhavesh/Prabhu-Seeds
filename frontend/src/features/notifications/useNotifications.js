@@ -12,7 +12,8 @@ function normalizeNotifications(payload) {
     type: row.type ?? 'task_assigned',
     message: row.message ?? row.title ?? 'Notification',
     created_at: row.created_at ?? row.createdAt ?? new Date().toISOString(),
-    is_read: Boolean(row.is_read ?? row.read ?? false),
+    // Backend returns read_at: datetime|null; also handle legacy is_read/read fields
+    is_read: row.read_at != null || Boolean(row.is_read ?? row.read ?? false),
     target_url: row.target_url ?? row.route ?? null,
     meta: row.meta ?? {},
   }))

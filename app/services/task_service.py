@@ -62,7 +62,6 @@ async def update_task(task_id: int, data: TaskUpdate, db: AsyncSession) -> Task 
     if not task:
         return None
 
-    STATUS_FLOW = {"assigned": 1, "running": 2, "hold": 3, "completed": 4}
     if data.status:
         task.status = data.status
         if data.status == "running" and not task.started_at:

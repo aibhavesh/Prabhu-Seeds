@@ -18,7 +18,7 @@ async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
-    role: str | None = Query(default=None, description="Filter by role (e.g. FIELD, MANAGER)"),
+    role: str | None = Query(default=None, description="Filter by role, e.g. FIELD, MANAGER"),
 ) -> list[User]:
     return await user_service.list_users(db, skip=skip, limit=limit, role=role)
 
