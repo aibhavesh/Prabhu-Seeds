@@ -1,17 +1,13 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.leave import LeaveCreate, LeaveUpdate, LeaveOut
 from app.services import leave_service
-
-
-class LeaveDecision(BaseModel):
-    decision: str  # approved | rejected
 
 router = APIRouter()
 
@@ -48,6 +44,10 @@ async def update_leave_status(
     return leave
 
 
+class LeaveDecision(BaseModel):
+    decision: str  # approved | rejected
+
+
 @router.patch("/{leave_id}", response_model=LeaveOut)
 async def review_leave(
     leave_id: int,
@@ -55,10 +55,13 @@ async def review_leave(
     current_user: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
-    """Frontend uses PATCH /{id} with { decision } to approve/reject."""
+    """Frontend-facing endpoint: PATCH /leaves/{id} with { decision: 'approved'|'rejected' }"""
     allowed = {"approved", "rejected"}
     if body.decision not in allowed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"decision must be one of {allowed}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"decision must be one of {allowed}",
+        )
     leave = await leave_service.update_leave_status(
         leave_id, LeaveUpdate(status=body.decision), current_user.id, db
     )
