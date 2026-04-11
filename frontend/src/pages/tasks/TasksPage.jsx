@@ -407,7 +407,6 @@ export default function TasksPage() {
         onReassign={() => setSelectedTask(null)}
         onUpdateStatus={() => setSelectedTask(null)}
       />
-      </div>
     </DashboardShell>
   )
 }

@@ -207,7 +207,6 @@ export default function LiveTrackingPage() {
     [employees]
   )
 
-  if (!allowed) {
   return (
     <DashboardShell>
       <GeofenceBanner alerts={geofenceAlerts} />
