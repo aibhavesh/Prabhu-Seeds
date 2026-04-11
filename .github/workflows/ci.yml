@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, frontend]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: pga_test
+          POSTGRES_USER: pga
+          POSTGRES_PASSWORD: pga_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check app/ tests/
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_URL: postgresql+asyncpg://pga:pga_test@localhost/pga_test
+          TEST_DATABASE_URL: postgresql+asyncpg://pga:pga_test@localhost/pga_test
+          JWT_SECRET_KEY: ci-test-secret-key-must-be-at-least-32-chars
+          REDIS_URL: redis://localhost:6379/0
+          MSG91_AUTH_KEY: ""
+          MSG91_TEMPLATE_ID: ""
+          GOOGLE_MAPS_API_KEY: ""
+          SUPABASE_URL: ""
+          SUPABASE_ANON_KEY: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          SUPABASE_JWT_SECRET: ""
+          SENTRY_DSN: ""
+        run: |
+          pytest tests/ \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -v
+
+      - name: Upload coverage report
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          fail_ci_if_error: false

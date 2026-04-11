@@ -12,7 +12,8 @@ from app.services import auth_service
 router = APIRouter()
 
 
-@router.post("/otp/send")
+@router.post("/send-otp")
+@router.post("/otp/send")   # legacy alias
 async def send_otp(
     body: OTPSendRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -23,7 +24,8 @@ async def send_otp(
     return {"message": result["message"]}
 
 
-@router.post("/otp/verify", response_model=TokenResponse)
+@router.post("/verify-otp", response_model=TokenResponse)
+@router.post("/otp/verify", response_model=TokenResponse)   # legacy alias
 async def verify_otp(
     body: OTPVerifyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
