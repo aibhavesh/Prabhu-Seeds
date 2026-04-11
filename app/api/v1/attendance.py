@@ -50,3 +50,43 @@ async def add_waypoint(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
     return await attendance_service.add_waypoint(body, db)
+
+
+@router.get("/", response_model=list[AttendanceOut])
+async def list_attendance(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: int = 0,
+    limit: int = 100,
+) -> list:
+    """List attendance records for the current user."""
+    from sqlalchemy import select
+    from app.models.attendance import Attendance
+    result = await db.execute(
+        select(Attendance)
+        .where(Attendance.user_id == current_user.id)
+        .order_by(Attendance.date.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+@router.get("/report")
+async def attendance_report(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Aggregated attendance summary for the current user."""
+    from sqlalchemy import select, func
+    from app.models.attendance import Attendance
+    total = await db.scalar(
+        select(func.count()).select_from(Attendance).where(Attendance.user_id == current_user.id)
+    )
+    present = await db.scalar(
+        select(func.count()).select_from(Attendance).where(
+            Attendance.user_id == current_user.id,
+            Attendance.check_in.isnot(None),
+        )
+    )
+    return {"total": total or 0, "present": present or 0}

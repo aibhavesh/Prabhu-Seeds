@@ -1,5 +1,6 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -38,6 +39,32 @@ async def update_leave_status(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
     leave = await leave_service.update_leave_status(leave_id, body, current_user.id, db)
+    if not leave:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave not found")
+    return leave
+
+
+class LeaveDecision(BaseModel):
+    decision: str  # approved | rejected
+
+
+@router.patch("/{leave_id}", response_model=LeaveOut)
+async def review_leave(
+    leave_id: int,
+    body: LeaveDecision,
+    current_user: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> object:
+    """Frontend-facing endpoint: PATCH /leaves/{id} with { decision: 'approved'|'rejected' }"""
+    allowed = {"approved", "rejected"}
+    if body.decision not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"decision must be one of {allowed}",
+        )
+    leave = await leave_service.update_leave_status(
+        leave_id, LeaveUpdate(status=body.decision), current_user.id, db
+    )
     if not leave:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Leave not found")
     return leave

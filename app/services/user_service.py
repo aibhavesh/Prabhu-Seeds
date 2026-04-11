@@ -5,8 +5,11 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 
 
-async def list_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> list[User]:
-    result = await db.execute(select(User).offset(skip).limit(limit))
+async def list_users(db: AsyncSession, skip: int = 0, limit: int = 100, role: str | None = None) -> list[User]:
+    q = select(User)
+    if role:
+        q = q.where(User.role == role.upper())
+    result = await db.execute(q.offset(skip).limit(limit))
     return list(result.scalars().all())
 
 
