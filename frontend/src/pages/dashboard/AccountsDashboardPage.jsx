@@ -6,7 +6,6 @@ import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardSh
 import NotificationBell from '@/features/notifications/NotificationBell'
 import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
-import { fullNavItems } from './dashboardNav'
 
 const MONTH_OPTIONS = [
   { value: '2023-10', label: 'Oct 2023' },
@@ -290,7 +289,6 @@ export default function AccountsDashboardPage() {
 
   return (
     <DashboardShell
-      navItems={fullNavItems}
       footer={
         <div className="flex items-center gap-2 bg-surface-container-lowest px-2 py-2">
           <span className="h-5 w-5 rounded-full bg-primary text-on-primary text-[10px] font-bold inline-flex items-center justify-center">AD</span>

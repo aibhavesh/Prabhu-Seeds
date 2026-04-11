@@ -16,17 +16,7 @@ import {
 import apiClient from '@/lib/axios'
 import NotificationBell from '@/features/notifications/NotificationBell'
 import { useAuthStore } from '@/store/authStore'
-
-const NAV_ITEMS = [
-  { label: 'Dashboard', icon: 'dashboard', to: '/dashboard/owner', available: true },
-  { label: 'Tasks', icon: 'task', to: '/tasks', available: true },
-  { label: 'Attendance', icon: 'calendar_month', to: '/attendance', available: true },
-  { label: 'Travel', icon: 'flight_takeoff', to: '/travel', available: true },
-  { label: 'Live Tracking', icon: 'location_on', to: '/tracking/live', available: true },
-  { label: 'Analytics', icon: 'monitoring', available: false },
-  { label: 'Dealers', icon: 'storefront', available: false },
-  { label: 'Settings', icon: 'settings', available: false },
-]
+import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 
 const STATE_SHAPES = [
   { code: 'PB', name: 'Punjab', points: '140,70 165,70 172,90 145,95' },
@@ -271,31 +261,6 @@ function completionFill(completionPct) {
   return `hsl(133 48% ${lightness}%)`
 }
 
-function DashboardSidebarItem({ item }) {
-  const base = 'group flex items-center gap-3 px-3 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors'
-
-  if (!item.available) {
-    return (
-      <div className={`${base} text-on-surface-variant opacity-60 cursor-not-allowed`}>
-        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{item.icon}</span>
-        <span>{item.label}</span>
-      </div>
-    )
-  }
-
-  return (
-    <NavLink
-      to={item.to}
-      className={({ isActive }) =>
-        `${base} ${isActive ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-lowest hover:text-on-surface'}`
-      }
-    >
-      <span className="material-symbols-outlined text-[16px]" aria-hidden="true">{item.icon}</span>
-      <span>{item.label}</span>
-    </NavLink>
-  )
-}
-
 function KpiCard({ label, value, trend, accent }) {
   const trendIcon = trend.direction === 'up' ? 'north' : trend.direction === 'down' ? 'south' : 'remove'
 
@@ -417,8 +382,6 @@ function DepartmentTooltip({ active, payload, label }) {
 
 export default function OwnerDashboardPage() {
   const user = useAuthStore((s) => s.user)
-  const allowed = user?.role === 'owner'
-
   const monthDefaults = useMemo(() => getCurrentMonthRange(), [])
   const [fromDate, setFromDate] = useState(monthDefaults.fromDate)
   const [toDate, setToDate] = useState(monthDefaults.toDate)
@@ -502,46 +465,12 @@ export default function OwnerDashboardPage() {
     })
   }
 
-  if (!allowed) {
-    return (
-      <div className="min-h-screen bg-surface flex items-center justify-center px-4">
-        <div className="bg-surface-container-lowest shadow-ghost p-6 text-center max-w-md">
-          <h1 className="text-2xl font-black font-headline text-on-surface">Access Restricted</h1>
-          <p className="text-on-surface-variant mt-2">Owner dashboard is available only for Owner role.</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-surface text-on-surface">
-      <div className="min-h-screen lg:grid lg:grid-cols-[240px_1fr]">
-        <aside className="hidden lg:flex lg:flex-col bg-surface-container-low border-r border-outline-variant/20">
-          <div className="px-6 py-6 border-b border-outline-variant/20">
-            <p className="text-xl font-black font-headline text-primary leading-none">Prabhu Seeds</p>
-            <p className="text-[10px] mt-2 font-bold uppercase tracking-[0.2em] text-on-surface-variant">Agritask Platform</p>
-          </div>
-
-          <nav className="flex-1 px-3 py-4 space-y-1">
-            {NAV_ITEMS.map((item) => (
-              <DashboardSidebarItem key={item.label} item={item} />
-            ))}
-          </nav>
-
-          <div className="px-4 py-3 border-t border-outline-variant/20">
-            <div className="bg-surface-container-lowest border border-outline-variant/15 px-3 py-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-primary">System Status</p>
-              <p className="text-xs text-on-surface-variant mt-1">Last synced 2m ago</p>
-            </div>
-          </div>
-        </aside>
-
-        <div className="min-w-0 flex flex-col">
-          <header className="h-auto min-h-14 bg-surface-container-lowest border-b border-outline-variant/20 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 text-sm text-on-surface-variant min-w-0">
-              <span className="font-bold text-primary whitespace-nowrap">PGA AgriTask / Dashboard</span>
-            </div>
-
+    <DashboardShell
+      topbar={
+        <DashboardTopbar
+          left={<span className="font-bold text-primary whitespace-nowrap text-sm">PGA AgriTask / Dashboard</span>}
+          right={
             <div className="flex items-center gap-2 flex-wrap justify-end">
               <input
                 type="date"
@@ -566,13 +495,12 @@ export default function OwnerDashboardPage() {
                 Export PDF
               </button>
               <NotificationBell />
-              <span className="h-8 w-8 rounded-full bg-primary-container text-on-primary text-xs font-bold inline-flex items-center justify-center" aria-label="Profile">
-                OW
-              </span>
             </div>
-          </header>
-
-          <main className="flex-1 px-4 sm:px-6 py-6 space-y-6" ref={dashboardRef}>
+          }
+        />
+      }
+    >
+      <div className="space-y-6" ref={dashboardRef}>
             <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
               {(dashboardQuery.isLoading && !dashboardQuery.data)
                 ? Array.from({ length: 5 }).map((_, idx) => <KpiSkeleton key={idx} />)
@@ -672,9 +600,7 @@ export default function OwnerDashboardPage() {
                 </div>
               </section>
             )}
-          </main>
-        </div>
       </div>
-    </div>
+    </DashboardShell>
   )
 }

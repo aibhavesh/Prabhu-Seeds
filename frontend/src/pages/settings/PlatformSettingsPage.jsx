@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 import apiClient from '@/lib/axios'
-import { settingsNavItems } from '@/pages/dashboard/dashboardNav'
 
 function buildMockSettingsData() {
   return {
@@ -114,7 +113,6 @@ export default function PlatformSettingsPage() {
     <DashboardShell
       brandTitle="Prabhu Seeds"
       brandSubtitle="Agritask Platform"
-      navItems={settingsNavItems}
       topbar={
         <DashboardTopbar
           left={

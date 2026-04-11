@@ -4,7 +4,6 @@ import { format } from 'date-fns'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
-import { fieldNavItems } from './dashboardNav'
 
 function buildMockFieldData() {
   return {
@@ -141,7 +140,6 @@ export default function FieldStaffDashboardPage() {
 
   return (
     <DashboardShell
-      navItems={fieldNavItems}
       footer={
         <div className="bg-surface-container-lowest px-2 py-2 flex items-center gap-2">
           <span className="h-6 w-6 rounded-sm bg-surface-container-high inline-flex items-center justify-center text-[10px] font-bold">

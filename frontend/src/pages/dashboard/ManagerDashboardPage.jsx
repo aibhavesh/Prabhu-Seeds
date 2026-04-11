@@ -4,7 +4,6 @@ import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardSh
 import NotificationBell from '@/features/notifications/NotificationBell'
 import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
-import { fullNavItems } from './dashboardNav'
 
 const WEEK_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
@@ -179,19 +178,6 @@ export default function ManagerDashboardPage() {
 
   return (
     <DashboardShell
-      navItems={fullNavItems.map((item) => ({
-        ...item,
-        to: item.label === 'Dashboard' ? '/dashboard/manager' : item.to,
-      }))}
-      footer={
-        <div className="flex items-center gap-2 bg-surface-container-lowest px-2 py-2">
-          <span className="h-5 w-5 rounded-full bg-primary text-on-primary text-[10px] font-bold inline-flex items-center justify-center">JD</span>
-          <div>
-            <p className="text-[10px] font-bold text-on-surface">{user?.name ?? 'John Doe'}</p>
-            <p className="text-[9px] text-on-surface-variant">Regional Manager</p>
-          </div>
-        </div>
-      }
       topbar={
         <DashboardTopbar
           left={
