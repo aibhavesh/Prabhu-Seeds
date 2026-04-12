@@ -52,3 +52,39 @@ export function useCreateTask() {
     },
   })
 }
+
+/** Update (edit/reassign) an existing task. */
+export function useUpdateTask() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ taskId, ...body }) =>
+      apiClient.patch(`/api/v1/tasks/${taskId}`, body).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
+/** Permanently delete a task (manager/owner only). */
+export function useDeleteTask() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (taskId) =>
+      apiClient.delete(`/api/v1/tasks/${taskId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
+/** Submit a completion record for a task (field role). */
+export function useSubmitRecord() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ taskId, ...body }) =>
+      apiClient.post(`/api/v1/tasks/${taskId}/records`, body).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}

@@ -32,7 +32,9 @@ class TaskRecordOut(BaseModel):
 
 class TaskCreate(BaseModel):
     title: str
-    assigned_to: uuid.UUID | None = None
+    assignment_type: str = "singular"         # singular | group
+    assigned_to: uuid.UUID | None = None      # used when assignment_type == singular
+    members: list[uuid.UUID] = []             # used when assignment_type == group
     district_id: str | None = None
     dept: str | None = None
     activity_type: str | None = None
@@ -41,13 +43,22 @@ class TaskCreate(BaseModel):
     target: int = 1
     unit: str = "NOS"
     deadline: _Date | None = None
+    repeat_count: int = 1
+    description: str | None = None
 
 
 class TaskUpdate(BaseModel):
-    status: str | None = None  # running|hold|completed
+    status: str | None = None
     title: str | None = None
     target: int | None = None
     deadline: _Date | None = None
+    repeat_count: int | None = None
+    assigned_to: uuid.UUID | None = None
+    dept: str | None = None
+    activity_type: str | None = None
+    description: str | None = None
+    assignment_type: str | None = None
+    members: list[uuid.UUID] | None = None  # replaces all existing members when provided
 
 
 class TaskOut(BaseModel):
@@ -67,9 +78,22 @@ class TaskOut(BaseModel):
     deadline: _Date | None
     started_at: _Date | None
     created_at: datetime
+    repeat_count: int = 1
     record_count: int = 0
+    description: str | None = None
+    assignment_type: str = "singular"
+    members: list[uuid.UUID] = []
+    member_names: list[str] = []
 
     model_config = {"from_attributes": True}
+
+    @property
+    def completions_remaining(self) -> int:
+        return max(0, self.repeat_count - self.record_count)
+
+    @property
+    def is_fully_complete(self) -> bool:
+        return self.record_count >= self.repeat_count
 
 
 class TaskMeta(BaseModel):

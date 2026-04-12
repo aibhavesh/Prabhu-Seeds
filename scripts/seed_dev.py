@@ -65,11 +65,21 @@ async def seed():
                 is_active=True,
             )
             db.add(field)
+            accounts = User(
+                id=uuid.uuid4(),
+                name="Accounts Staff",
+                mobile="9666666666",
+                role="ACCOUNTS",
+                manager_id=manager.id,
+                is_active=True,
+            )
+            db.add(accounts)
             await db.commit()
-            print("✓ Created 3 users:")
-            print(f"  OWNER   → mobile: 9999999999  (OTP: 123456)")
-            print(f"  MANAGER → mobile: 9888888888  (OTP: 123456)")
-            print(f"  FIELD   → mobile: 9777777777  (OTP: 123456)")
+            print("Created 4 users:")
+            print(f"  OWNER    -> mobile: 9999999999  (OTP: 123456)")
+            print(f"  MANAGER  -> mobile: 9888888888  (OTP: 123456)")
+            print(f"  FIELD    -> mobile: 9777777777  (OTP: 123456)")
+            print(f"  ACCOUNTS -> mobile: 9666666666  (OTP: 123456)")
 
         # ── Activity Types ─────────────────────────────────────────────────
         count = (await db.execute(select(ActivityType))).scalars().all()

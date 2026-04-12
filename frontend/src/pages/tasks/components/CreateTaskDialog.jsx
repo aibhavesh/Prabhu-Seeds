@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Label from '@radix-ui/react-label'
 import { useForm } from 'react-hook-form'
@@ -12,13 +12,15 @@ import { useActivityTypes, useFieldStaff, useCreateTask } from '../hooks/useTask
 const schema = z.object({
   title: z.string().min(1, 'Title is required'),
   activity_type: z.string().min(1, 'Activity type is required'),
+  assignment_type: z.enum(['singular', 'group']).default('singular'),
   assigned_to: z.string().optional(),
   dept: z.string().optional(),
   deadline: z.string().optional(),
   description: z.string().optional(),
+  repeat_count: z.coerce.number().int().min(1).max(365).default(1),
 })
 
-// ── Field helpers ──────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 function FieldError({ message }) {
   if (!message) return null
@@ -43,31 +45,158 @@ function Field({ label, htmlFor, error, children }) {
 const inputCls =
   'w-full bg-surface-container-low border-none px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary'
 
+function initials(name) {
+  return (name ?? '?')
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
+
+// ── Group member picker ────────────────────────────────────────────────────
+
+function MemberPicker({ staff, selected, onToggle }) {
+  return (
+    <div className="space-y-2">
+      {/* Selected chips */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-1">
+          {selected.map((id) => {
+            const s = staff.find((x) => x.id === id)
+            if (!s) return null
+            return (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs font-semibold px-2 py-0.5 rounded-full"
+              >
+                <span className="w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center">
+                  {initials(s.name)}
+                </span>
+                {s.name}
+                <button
+                  type="button"
+                  onClick={() => onToggle(id)}
+                  className="ml-0.5 text-primary/60 hover:text-primary leading-none"
+                  aria-label={`Remove ${s.name}`}
+                >
+                  &times;
+                </button>
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Agent list */}
+      <div className="max-h-44 overflow-y-auto divide-y divide-outline-variant/10 border border-outline-variant/20 bg-surface-container-lowest">
+        {staff.length === 0 && (
+          <p className="px-3 py-4 text-xs text-on-surface-variant text-center">
+            No field agents found.
+          </p>
+        )}
+        {staff.map((s) => {
+          const checked = selected.includes(s.id)
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onToggle(s.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                checked ? 'bg-primary/8' : 'hover:bg-surface-container-low'
+              }`}
+            >
+              {/* Checkbox indicator */}
+              <span
+                className={`flex-shrink-0 w-4 h-4 border rounded flex items-center justify-center ${
+                  checked
+                    ? 'bg-primary border-primary'
+                    : 'border-outline-variant/50 bg-white'
+                }`}
+              >
+                {checked && (
+                  <svg className="w-2.5 h-2.5 text-on-primary" viewBox="0 0 10 8" fill="none">
+                    <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+              {/* Avatar */}
+              <span className="w-7 h-7 rounded-full bg-primary-container text-on-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                {initials(s.name)}
+              </span>
+              {/* Name */}
+              <span className={`text-sm ${checked ? 'font-semibold text-on-surface' : 'text-on-surface-variant'}`}>
+                {s.name}
+              </span>
+              {checked && (
+                <span className="ml-auto text-[10px] font-bold text-primary uppercase tracking-wide">
+                  Added
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {selected.length > 0 && (
+        <p className="text-xs text-primary font-semibold">
+          {selected.length} agent{selected.length !== 1 ? 's' : ''} selected
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function CreateTaskDialog({ open, onOpenChange }) {
-  // Only fetch when dialog is open — avoids unnecessary requests at page load
   const { data: activityTypes = [] } = useActivityTypes({ enabled: open })
   const { data: fieldStaff = [] } = useFieldStaff({ enabled: open })
   const createTask = useCreateTask()
+
+  const [selectedMembers, setSelectedMembers] = useState([])
 
   const {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
-  } = useForm({ resolver: zodResolver(schema) })
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: { repeat_count: 1, assignment_type: 'singular' },
+  })
 
-  // Reset form when dialog closes
+  const repeatCount = watch('repeat_count') || 1
+  const assignmentType = watch('assignment_type')
+
+  // Reset everything when dialog closes
   useEffect(() => {
-    if (!open) reset()
+    if (!open) {
+      reset({ repeat_count: 1, assignment_type: 'singular' })
+      setSelectedMembers([])
+    }
   }, [open, reset])
 
+  function toggleMember(id) {
+    setSelectedMembers((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    )
+  }
+
   async function onSubmit(values) {
-    // Strip empty optional fields before sending
     const payload = Object.fromEntries(
       Object.entries(values).filter(([, v]) => v !== '' && v != null)
     )
+
+    if (values.assignment_type === 'group') {
+      delete payload.assigned_to
+      payload.members = selectedMembers
+    } else {
+      delete payload.members
+    }
+
     try {
       await toast.promise(createTask.mutateAsync(payload), {
         loading: 'Creating task…',
@@ -85,7 +214,7 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-on-surface/35 z-40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 bg-surface-container-lowest shadow-ghost p-6
+          className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 bg-surface-container-lowest shadow-ghost p-6 max-h-[90vh] overflow-y-auto
             data-[state=open]:animate-in data-[state=closed]:animate-out
             data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0
             data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
@@ -104,6 +233,7 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+            {/* Title */}
             <Field label="Title" htmlFor="title" error={errors.title?.message}>
               <input
                 id="title"
@@ -113,40 +243,17 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
               />
             </Field>
 
+            {/* Activity Type + Dept */}
             <div className="grid grid-cols-2 gap-4">
-              <Field
-                label="Activity Type"
-                htmlFor="activity_type"
-                error={errors.activity_type?.message}
-              >
+              <Field label="Activity Type" htmlFor="activity_type" error={errors.activity_type?.message}>
                 <select id="activity_type" {...register('activity_type')} className={inputCls}>
                   <option value="">Select…</option>
                   {activityTypes.map((t) => (
-                    // value = name (string) to match TaskCreate.activity_type: str
-                    <option key={t.id ?? t} value={t.name ?? t}>
-                      {t.name ?? t}
-                    </option>
+                    <option key={t.id ?? t} value={t.name ?? t}>{t.name ?? t}</option>
                   ))}
                 </select>
               </Field>
 
-              <Field
-                label="Assigned To"
-                htmlFor="assigned_to"
-                error={errors.assigned_to?.message}
-              >
-                <select id="assigned_to" {...register('assigned_to')} className={inputCls}>
-                  <option value="">Unassigned</option>
-                  {fieldStaff.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <Field label="Department" htmlFor="dept" error={errors.dept?.message}>
                 <select id="dept" {...register('dept')} className={inputCls}>
                   <option value="">Select…</option>
@@ -157,22 +264,81 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
                   <option value="Field Ops">Field Ops</option>
                 </select>
               </Field>
-
-              <Field label="Deadline" htmlFor="deadline" error={errors.deadline?.message}>
-                <input
-                  id="deadline"
-                  type="date"
-                  {...register('deadline')}
-                  className={inputCls}
-                />
-              </Field>
             </div>
 
-            <Field
-              label="Notes / Description"
-              htmlFor="description"
-              error={errors.description?.message}
-            >
+            {/* Deadline */}
+            <Field label="Deadline" htmlFor="deadline" error={errors.deadline?.message}>
+              <input id="deadline" type="date" {...register('deadline')} className={inputCls} />
+            </Field>
+
+            {/* ── Assignment section ─────────────────────────────────── */}
+            <div className="bg-surface-container-low p-4 space-y-3">
+              <div>
+                <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                  Assignment Type
+                </p>
+                {/* Toggle */}
+                <div className="inline-flex rounded overflow-hidden border border-outline-variant/30">
+                  {['singular', 'group'].map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => {
+                        setValue('assignment_type', type)
+                        setSelectedMembers([])
+                      }}
+                      className={`px-5 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
+                        assignmentType === type
+                          ? 'bg-primary text-on-primary'
+                          : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+                      }`}
+                    >
+                      {type === 'singular' ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[14px]">person</span>
+                          Singular
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-[14px]">group</span>
+                          Group
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {assignmentType === 'singular' ? (
+                <Field label="Assign To" htmlFor="assigned_to" error={errors.assigned_to?.message}>
+                  <select id="assigned_to" {...register('assigned_to')} className={inputCls}>
+                    <option value="">Unassigned</option>
+                    {fieldStaff.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              ) : (
+                <div>
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                    Select Field Agents
+                  </p>
+                  <MemberPicker
+                    staff={fieldStaff}
+                    selected={selectedMembers}
+                    onToggle={toggleMember}
+                  />
+                  {selectedMembers.length === 0 && (
+                    <p className="text-xs text-on-surface-variant mt-1">
+                      Select at least one field agent for this group task.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Description */}
+            <Field label="Notes / Description" htmlFor="description" error={errors.description?.message}>
               <textarea
                 id="description"
                 {...register('description')}
@@ -181,6 +347,52 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
                 placeholder="Operational notes, instructions…"
               />
             </Field>
+
+            {/* Repetitions */}
+            <div className="bg-surface-container-low p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label.Root
+                    htmlFor="repeat_count"
+                    className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-0.5"
+                  >
+                    Repetitions Required
+                  </Label.Root>
+                  <p className="text-xs text-on-surface-variant">
+                    How many times must this task be completed?
+                  </p>
+                </div>
+                <input
+                  id="repeat_count"
+                  type="number"
+                  min={1}
+                  max={365}
+                  {...register('repeat_count')}
+                  className="w-20 bg-surface-container-lowest border-none px-3 py-2 text-sm font-bold text-center outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: Math.min(repeatCount, 20) }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="w-6 h-6 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-[9px] font-bold text-primary"
+                  >
+                    {i + 1}
+                  </span>
+                ))}
+                {repeatCount > 20 && (
+                  <span className="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-[9px] font-bold text-on-surface-variant">
+                    +{repeatCount - 20}
+                  </span>
+                )}
+              </div>
+              {repeatCount > 1 && (
+                <p className="text-xs text-primary font-semibold">
+                  Assigned staff must submit {repeatCount} completions for this task.
+                </p>
+              )}
+              <FieldError message={errors.repeat_count?.message} />
+            </div>
 
             <div className="flex justify-end gap-3 pt-2">
               <Dialog.Close asChild>
@@ -193,7 +405,7 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
               </Dialog.Close>
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || (assignmentType === 'group' && selectedMembers.length === 0)}
                 className="px-5 py-2 bg-gradient-to-r from-primary to-primary-container text-on-primary text-sm font-bold uppercase tracking-wider disabled:opacity-50"
               >
                 {isSubmitting ? 'Creating…' : 'Create Task'}

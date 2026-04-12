@@ -13,6 +13,8 @@ import { useExportTasks } from './hooks/useExportTasks'
 import { useAuthStore } from '@/store/authStore'
 import TaskStatusBadge from './components/TaskStatusBadge'
 import CreateTaskDialog from './components/CreateTaskDialog'
+import EditTaskDialog from './components/EditTaskDialog'
+import UpdateStatusDialog from './components/UpdateStatusDialog'
 import TaskDetailSheet from './components/TaskDetailSheet'
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -111,6 +113,37 @@ function buildColumns(onView, onAssign) {
           <span className={`font-mono text-sm ${overdue ? 'text-error font-bold' : 'text-on-surface-variant'}`}>
             {format(date, 'MMM d, yyyy')}
           </span>
+        )
+      },
+    }),
+    columnHelper.accessor('repeat_count', {
+      header: 'Repetitions',
+      cell: (info) => {
+        const total = info.getValue() ?? 1
+        const done = info.row.original.record_count ?? 0
+        const pct = Math.min(100, Math.round((done / total) * 100))
+        const complete = done >= total
+        return (
+          <div className="min-w-[90px]">
+            <div className="flex items-center justify-between mb-1">
+              <span className={`text-xs font-bold ${complete ? 'text-green-600' : 'text-on-surface'}`}>
+                {done} / {total}
+              </span>
+              {total > 1 && (
+                <span className={`text-[10px] font-semibold ${complete ? 'text-green-600' : 'text-on-surface-variant'}`}>
+                  {pct}%
+                </span>
+              )}
+            </div>
+            {total > 1 && (
+              <div className="h-1.5 bg-outline-variant/20 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${complete ? 'bg-green-600' : 'bg-primary'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            )}
+          </div>
         )
       },
     }),
@@ -254,6 +287,8 @@ export default function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState(null)
+  const [editTask, setEditTask] = useState(null)
+  const [actionTask, setActionTask] = useState(null)
 
   const user = useAuthStore((s) => s.user)
   const canCreate = ['owner', 'manager'].includes(user?.role)
@@ -400,12 +435,26 @@ export default function TasksPage() {
 
       {/* Dialogs */}
       <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <EditTaskDialog
+        task={editTask}
+        open={!!editTask}
+        onOpenChange={(open) => !open && setEditTask(null)}
+      />
+
+      <UpdateStatusDialog
+        task={actionTask}
+        open={!!actionTask}
+        onOpenChange={(open) => !open && setActionTask(null)}
+        role={user?.role?.toLowerCase()}
+      />
+
       <TaskDetailSheet
         task={selectedTask}
         open={!!selectedTask}
         onOpenChange={(open) => !open && setSelectedTask(null)}
-        onReassign={() => setSelectedTask(null)}
-        onUpdateStatus={() => setSelectedTask(null)}
+        onReassign={(task) => { setSelectedTask(null); setEditTask(task) }}
+        onUpdateStatus={(task) => { setSelectedTask(null); setActionTask(task) }}
       />
     </DashboardShell>
   )

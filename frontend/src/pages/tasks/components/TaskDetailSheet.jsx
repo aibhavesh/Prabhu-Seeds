@@ -1,5 +1,6 @@
 import { format, parseISO, isPast } from 'date-fns'
 import * as Dialog from '@radix-ui/react-dialog'
+import { useAuthStore } from '@/store/authStore'
 import TaskStatusBadge from './TaskStatusBadge'
 import MiniMap from '@/components/maps/MiniMap'
 
@@ -53,12 +54,17 @@ function SectionLabel({ children }) {
 // ── Sheet ──────────────────────────────────────────────────────────────────
 
 export default function TaskDetailSheet({ task, open, onOpenChange, onReassign, onUpdateStatus }) {
+  const role = useAuthStore((s) => s.user?.role?.toLowerCase())
+  const isManager = role === 'owner' || role === 'manager'
+
   if (!task) return null
 
-  const isOverdue =
-    task.due_date &&
-    isPast(parseISO(task.due_date)) &&
-    task.status !== 'completed'
+  const deadline = task.deadline ?? task.due_date
+  const isOverdue = deadline && isPast(parseISO(deadline)) && task.status !== 'completed'
+  const repeatCount = task.repeat_count ?? 1
+  const recordCount = task.record_count ?? 0
+  const pct = Math.min(100, Math.round((recordCount / repeatCount) * 100))
+  const fullyDone = recordCount >= repeatCount
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -98,18 +104,35 @@ export default function TaskDetailSheet({ task, open, onOpenChange, onReassign, 
             <section>
               <SectionLabel>Core Specifications</SectionLabel>
               <div className="grid grid-cols-2 gap-4">
-                <div>
+                <div className={task.assignment_type === 'group' ? 'col-span-2' : ''}>
                   <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">
-                    Assigned To
+                    {task.assignment_type === 'group' ? 'Group Members' : 'Assigned To'}
                   </p>
-                  <div className="flex items-center gap-2">
-                    <span className="w-7 h-7 rounded-full bg-green-700 text-white flex items-center justify-center text-xs font-bold uppercase">
-                      {task.assigned_to?.name?.[0] ?? '?'}
-                    </span>
-                    <span className="text-sm font-medium text-gray-800">
-                      {task.assigned_to?.name ?? '—'}
-                    </span>
-                  </div>
+                  {task.assignment_type === 'group' ? (
+                    <div className="flex flex-wrap gap-2">
+                      {(task.member_names ?? []).length > 0 ? (
+                        task.member_names.map((name, i) => (
+                          <span key={i} className="inline-flex items-center gap-1.5 bg-primary/10 text-primary text-xs font-semibold px-2.5 py-1 rounded-full">
+                            <span className="w-5 h-5 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center">
+                              {name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+                            </span>
+                            {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-gray-500">No members assigned</span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-full bg-green-700 text-white flex items-center justify-center text-xs font-bold uppercase">
+                        {(task.assigned_to_name ?? task.assigned_to?.name ?? '?')[0]}
+                      </span>
+                      <span className="text-sm font-medium text-gray-800">
+                        {task.assigned_to_name ?? task.assigned_to?.name ?? '—'}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -140,27 +163,69 @@ export default function TaskDetailSheet({ task, open, onOpenChange, onReassign, 
                   <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">
                     Deadline
                   </p>
-                  <p
-                    className={`text-sm font-semibold ${
-                      isOverdue ? 'text-red-600' : 'text-gray-800'
-                    }`}
-                  >
-                    {task.due_date
-                      ? format(parseISO(task.due_date), 'MMM d, yyyy')
-                      : '—'}
+                  <p className={`text-sm font-semibold ${isOverdue ? 'text-red-600' : 'text-gray-800'}`}>
+                    {deadline ? format(parseISO(deadline), 'MMM d, yyyy') : '—'}
                   </p>
                 </div>
 
-                {task.department && (
+                {(task.dept ?? task.department) && (
                   <div>
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">
                       Department
                     </p>
                     <p className="text-sm font-medium text-gray-700 uppercase tracking-wide">
-                      {task.department}
+                      {task.dept ?? task.department}
                     </p>
                   </div>
                 )}
+              </div>
+            </section>
+
+            {/* Repetitions Progress */}
+            <section>
+              <SectionLabel>Repetitions Progress</SectionLabel>
+              <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`text-2xl font-black ${fullyDone ? 'text-green-600' : 'text-gray-900'}`}>
+                      {recordCount}
+                      <span className="text-base font-medium text-gray-400"> / {repeatCount}</span>
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {fullyDone
+                        ? 'All repetitions completed'
+                        : `${repeatCount - recordCount} remaining`}
+                    </p>
+                  </div>
+                  {fullyDone && (
+                    <span className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-lg">
+                      ✓
+                    </span>
+                  )}
+                </div>
+                <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${fullyDone ? 'bg-green-500' : 'bg-green-700'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {Array.from({ length: Math.min(repeatCount, 20) }).map((_, i) => (
+                    <span
+                      key={i}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold border ${
+                        i < recordCount
+                          ? 'bg-green-600 border-green-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-400'
+                      }`}
+                    >
+                      {i + 1}
+                    </span>
+                  ))}
+                  {repeatCount > 20 && (
+                    <span className="text-xs text-gray-400 self-center">+{repeatCount - 20} more</span>
+                  )}
+                </div>
               </div>
             </section>
 
@@ -194,19 +259,25 @@ export default function TaskDetailSheet({ task, open, onOpenChange, onReassign, 
 
           {/* Footer actions */}
           <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={() => onReassign?.(task)}
-              className="flex-1 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 uppercase tracking-wide"
-            >
-              Reassign Task
-            </button>
+            {isManager && (
+              <button
+                type="button"
+                onClick={() => onReassign?.(task)}
+                className="flex-1 py-2.5 border border-gray-300 text-sm font-semibold text-gray-700 hover:bg-gray-50 uppercase tracking-wide"
+              >
+                Edit Task
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onUpdateStatus?.(task)}
-              className="flex-1 py-2.5 rounded-lg bg-green-800 hover:bg-green-700 text-white text-sm font-semibold uppercase tracking-wide"
+              className={`flex-1 py-2.5 text-sm font-semibold uppercase tracking-wide ${
+                isManager
+                  ? 'bg-error/90 hover:bg-error text-white'
+                  : 'bg-green-700 hover:bg-green-600 text-white'
+              }`}
             >
-              Update Status
+              {isManager ? 'Delete Task' : 'Submit Completion'}
             </button>
           </div>
         </Dialog.Content>

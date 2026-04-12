@@ -141,7 +141,7 @@ export default function MyLeavesPage() {
         applyLeave.mutateAsync({
           from_date: values.fromDate,
           to_date: values.toDate,
-          leave_type: values.leaveType,
+          type: values.leaveType,
           reason: values.reason,
         }),
         {

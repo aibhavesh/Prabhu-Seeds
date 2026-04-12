@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.attendance import CheckInRequest, CheckOutRequest, WaypointCreate, AttendanceOut, WaypointOut
+from app.schemas.attendance import CheckInRequest, CheckOutRequest, WaypointCreate, AttendanceOut, AttendanceListOut, WaypointOut
 from app.services import attendance_service
 
 router = APIRouter()
@@ -52,22 +52,33 @@ async def add_waypoint(
     return await attendance_service.add_waypoint(body, db)
 
 
-@router.get("/", response_model=list[AttendanceOut])
+@router.get("/", response_model=list[AttendanceListOut])
 async def list_attendance(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
+    month: str | None = None,   # "YYYY-MM"
 ) -> list:
-    """List attendance records for the current user."""
+    """List attendance records for the current user, optionally filtered by month."""
+    import calendar as _cal
+    from datetime import date as _date
     from sqlalchemy import select
     from app.models.attendance import Attendance
+
+    query = select(Attendance).where(Attendance.user_id == current_user.id)
+
+    if month:
+        try:
+            y, m = int(month[:4]), int(month[5:7])
+            month_start = _date(y, m, 1)
+            month_end = _date(y, m, _cal.monthrange(y, m)[1])
+            query = query.where(Attendance.date >= month_start, Attendance.date <= month_end)
+        except (ValueError, IndexError):
+            pass
+
     result = await db.execute(
-        select(Attendance)
-        .where(Attendance.user_id == current_user.id)
-        .order_by(Attendance.date.desc())
-        .offset(skip)
-        .limit(limit)
+        query.order_by(Attendance.date.desc()).offset(skip).limit(limit)
     )
     return list(result.scalars().all())
 
@@ -76,17 +87,52 @@ async def list_attendance(
 async def attendance_report(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    month: str | None = None,   # "YYYY-MM"  — defaults to current month
 ) -> dict:
-    """Aggregated attendance summary for the current user."""
-    from sqlalchemy import select, func
+    """Per-day attendance calendar + summary for the current user."""
+    import calendar as _cal
+    from datetime import date as _date
+    from sqlalchemy import select
     from app.models.attendance import Attendance
-    total = await db.scalar(
-        select(func.count()).select_from(Attendance).where(Attendance.user_id == current_user.id)
-    )
-    present = await db.scalar(
-        select(func.count()).select_from(Attendance).where(
+
+    today = _date.today()
+    try:
+        y, m = (int(month[:4]), int(month[5:7])) if month else (today.year, today.month)
+    except (ValueError, AttributeError):
+        y, m = today.year, today.month
+
+    month_start = _date(y, m, 1)
+    month_end = _date(y, m, _cal.monthrange(y, m)[1])
+
+    result = await db.execute(
+        select(Attendance)
+        .where(
             Attendance.user_id == current_user.id,
-            Attendance.check_in.isnot(None),
+            Attendance.date >= month_start,
+            Attendance.date <= month_end,
         )
+        .order_by(Attendance.date)
     )
-    return {"total": total or 0, "present": present or 0}
+    records = result.scalars().all()
+
+    calendar_days = [
+        {
+            "date": r.date.isoformat(),
+            "attendance_pct": 100 if r.check_in else 0,
+            "check_in": r.check_in.isoformat() if r.check_in else None,
+            "check_out": r.check_out.isoformat() if r.check_out else None,
+            "km": float(r.km),
+            "status": r.status,
+        }
+        for r in records
+    ]
+
+    present = sum(1 for r in records if r.check_in)
+    km_total = sum(float(r.km) for r in records)
+
+    return {
+        "total": len(records),
+        "present": present,
+        "km_total": round(km_total, 1),
+        "calendar_days": calendar_days,
+    }

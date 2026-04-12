@@ -46,3 +46,16 @@ class AttendanceOut(BaseModel):
     waypoints: list[WaypointOut] = []
 
     model_config = {"from_attributes": True}
+
+
+class AttendanceListOut(BaseModel):
+    """Lightweight schema for list endpoints — no waypoints, avoids N+1 queries."""
+    id: int
+    user_id: uuid.UUID
+    date: _Date
+    check_in: datetime | None
+    check_out: datetime | None
+    km: Decimal
+    status: str
+
+    model_config = {"from_attributes": True}

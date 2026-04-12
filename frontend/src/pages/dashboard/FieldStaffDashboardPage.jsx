@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { format } from 'date-fns'
+import { format, parseISO, isPast } from 'date-fns'
+import { useNavigate } from 'react-router-dom'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
+import { useDutyStore } from '@/store/dutyStore'
+import { useTasks } from '@/pages/tasks/hooks/useTasks'
+import { useCheckIn, useCheckOut } from '@/pages/attendance/hooks/useAttendance'
 
 function buildMockFieldData() {
   return {
@@ -78,32 +82,55 @@ async function fetchFieldDashboard() {
   }
 }
 
-function statusPillClass(status) {
-  if (status === 'pending') return 'bg-amber-500/15 text-amber-700'
-  if (status === 'in_progress') return 'bg-primary/15 text-primary'
-  if (status === 'scheduled') return 'bg-indigo-500/15 text-indigo-700'
-  return 'bg-surface-container-low text-on-surface-variant'
+// Maps backend task status to display label + pill colour
+const STATUS_META = {
+  assigned:  { label: 'Pending',     cls: 'bg-amber-500/15 text-amber-700' },
+  running:   { label: 'In Progress', cls: 'bg-primary/15 text-primary' },
+  hold:      { label: 'On Hold',     cls: 'bg-gray-200 text-gray-600' },
+  completed: { label: 'Completed',   cls: 'bg-green-100 text-green-700' },
+}
+
+function statusMeta(status) {
+  return STATUS_META[status] ?? { label: status, cls: 'bg-surface-container-low text-on-surface-variant' }
 }
 
 function taskTypeClass(type) {
-  const lower = String(type).toLowerCase()
-  if (lower.includes('crop')) return 'bg-primary/10 text-primary'
-  if (lower.includes('field')) return 'bg-secondary/10 text-secondary'
-  if (lower.includes('payment')) return 'bg-tertiary/15 text-tertiary'
-  return 'bg-surface-container-low text-on-surface-variant'
+  const lower = String(type ?? '').toLowerCase()
+  if (lower.includes('crop') || lower.includes('seed') || lower.includes('soil')) return 'bg-primary/10 text-primary'
+  if (lower.includes('field') || lower.includes('visit') || lower.includes('survey')) return 'bg-secondary/10 text-secondary'
+  if (lower.includes('payment') || lower.includes('collection') || lower.includes('dealer')) return 'bg-tertiary/15 text-tertiary'
+  if (lower.includes('meet') || lower.includes('farmer') || lower.includes('market')) return 'bg-emerald-500/15 text-emerald-700'
+  return 'bg-surface-container text-on-surface-variant'
 }
 
 export default function FieldStaffDashboardPage() {
   const user = useAuthStore((store) => store.user)
-  const [checkedIn, setCheckedIn] = useState(false)
-  const [dutyStartedAt, setDutyStartedAt] = useState(null)
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const { checkedIn, dutyStartedAt, checkIn, checkOut } = useDutyStore()
+  const navigate = useNavigate()
+  const checkInMutation = useCheckIn()
+  const checkOutMutation = useCheckOut()
+
+  // Initialise from persisted start time so navigation doesn't reset the clock
+  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
+    dutyStartedAt ? Math.floor((Date.now() - dutyStartedAt) / 1000) : 0
+  )
 
   const dashboardQuery = useQuery({
     queryKey: ['field-dashboard'],
     queryFn: fetchFieldDashboard,
     placeholderData: (prev) => prev,
   })
+
+  // Fetch real tasks for this field user
+  const { data: tasksData, isLoading: tasksLoading } = useTasks({})
+
+  // Active = not yet completed, sorted: running first then assigned then hold
+  const activeTasks = useMemo(() => {
+    const ORDER = { running: 0, assigned: 1, hold: 2 }
+    return (tasksData?.tasks ?? [])
+      .filter((t) => t.status !== 'completed')
+      .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9))
+  }, [tasksData])
 
   const dashboard = dashboardQuery.data ?? buildMockFieldData()
 
@@ -124,19 +151,36 @@ export default function FieldStaffDashboardPage() {
     return `${hours}:${minutes}:${seconds}`
   }, [elapsedSeconds])
 
-  function toggleDuty() {
-    if (checkedIn) {
-      setCheckedIn(false)
-      setDutyStartedAt(null)
-      setElapsedSeconds(0)
-      return
-    }
-
-    const now = Date.now()
-    setCheckedIn(true)
-    setDutyStartedAt(now)
-    setElapsedSeconds(0)
+  function getGpsPosition() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) { resolve({ lat: 0, lng: 0 }); return }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve({ lat: 0, lng: 0 }),
+        { timeout: 6000 },
+      )
+    })
   }
+
+  async function toggleDuty() {
+    const { lat, lng } = await getGpsPosition()
+    if (checkedIn) {
+      checkOutMutation.mutate({ lat, lng, km: 0 }, {
+        onSettled: () => { checkOut(); setElapsedSeconds(0) },
+      })
+    } else {
+      checkInMutation.mutate({ lat, lng }, {
+        onSuccess: () => { checkIn(); setElapsedSeconds(0) },
+        onError: (err) => {
+          // Already checked in today — sync local state
+          const msg = err?.response?.data?.detail ?? ''
+          if (msg.toLowerCase().includes('already')) { checkIn(); setElapsedSeconds(0) }
+        },
+      })
+    }
+  }
+
+  const dutyBusy = checkInMutation.isPending || checkOutMutation.isPending
 
   return (
     <DashboardShell
@@ -215,9 +259,10 @@ export default function FieldStaffDashboardPage() {
             <button
               type="button"
               onClick={toggleDuty}
-              className={`h-10 px-8 text-xs font-bold uppercase tracking-[0.16em] ${checkedIn ? 'bg-error text-white' : 'bg-primary text-on-primary'}`}
+              disabled={dutyBusy}
+              className={`h-10 px-8 text-xs font-bold uppercase tracking-[0.16em] disabled:opacity-60 disabled:cursor-not-allowed ${checkedIn ? 'bg-error text-white' : 'bg-primary text-on-primary'}`}
             >
-              {checkedIn ? 'Check Out' : 'Check In'}
+              {dutyBusy ? '…' : checkedIn ? 'Check Out' : 'Check In'}
             </button>
           </article>
 
@@ -234,9 +279,13 @@ export default function FieldStaffDashboardPage() {
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <article className="bg-surface-container-lowest border-l-4 border-primary px-4 py-4">
-            <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">My Tasks Today</p>
-            <p className="text-5xl font-black font-headline mt-1">{dashboard.kpis.tasksToday}</p>
-            <p className="text-xs text-primary mt-1">Active</p>
+            <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">My Active Tasks</p>
+            <p className="text-5xl font-black font-headline mt-1">
+              {tasksLoading ? '…' : activeTasks.length}
+            </p>
+            <p className="text-xs text-primary mt-1">
+              {activeTasks.filter(t => t.status === 'running').length} in progress
+            </p>
           </article>
 
           <article className="bg-surface-container-lowest border-l-4 border-secondary px-4 py-4">
@@ -257,31 +306,90 @@ export default function FieldStaffDashboardPage() {
         <section className="bg-surface-container-lowest p-4">
           <div className="flex items-center justify-between gap-2 mb-4">
             <h2 className="text-2xl font-black font-headline">Active Itinerary</h2>
-            <button type="button" className="text-xs font-bold uppercase tracking-wider text-primary">View History</button>
+            <button
+              type="button"
+              onClick={() => navigate('/tasks')}
+              className="text-xs font-bold uppercase tracking-wider text-primary hover:opacity-80"
+            >
+              View All Tasks
+            </button>
           </div>
 
-          <div className="space-y-2">
-            {dashboard.itinerary.map((task) => (
-              <article key={task.id} className="bg-surface-container-low px-3 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                <div className="flex items-start gap-3 min-w-0">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${taskTypeClass(task.type)}`}>
-                    {task.type}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{task.title}</p>
-                    <p className="text-xs text-on-surface-variant truncate">{task.place}</p>
-                  </div>
-                </div>
+          {tasksLoading && (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-14 bg-surface-container-low animate-pulse" />
+              ))}
+            </div>
+          )}
 
-                <div className="flex items-center gap-2 self-end md:self-auto">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${statusPillClass(task.status)}`}>
-                    {String(task.status).replace('_', ' ')}
-                  </span>
-                  <button type="button" className="h-8 px-3 bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider">{task.action}</button>
-                </div>
-              </article>
-            ))}
-          </div>
+          {!tasksLoading && activeTasks.length === 0 && (
+            <div className="py-10 text-center">
+              <span className="material-symbols-outlined text-4xl text-on-surface-variant/40" aria-hidden="true">task_alt</span>
+              <p className="text-sm text-on-surface-variant mt-2">No active tasks assigned.</p>
+            </div>
+          )}
+
+          {!tasksLoading && activeTasks.length > 0 && (
+            <div className="space-y-2">
+              {activeTasks.map((task) => {
+                const sm = statusMeta(task.status)
+                const isRepeat = (task.repeat_count ?? 1) > 1
+                const deadline = task.deadline
+                const overdue = deadline && isPast(parseISO(deadline)) && task.status !== 'completed'
+                const actionLabel = task.status === 'running' ? 'Submit' : task.status === 'hold' ? 'Resume' : 'Start'
+
+                return (
+                  <article
+                    key={task.id}
+                    className="bg-surface-container-low px-3 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2"
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className={`mt-0.5 flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${taskTypeClass(task.activity_type)}`}>
+                        {task.activity_type ?? 'Task'}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">{task.title}</p>
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          {task.district_id && (
+                            <span className="text-xs text-on-surface-variant">
+                              {task.district_id}
+                            </span>
+                          )}
+                          {task.dept && (
+                            <span className="text-xs text-on-surface-variant/60">{task.dept}</span>
+                          )}
+                          {deadline && (
+                            <span className={`text-xs font-mono ${overdue ? 'text-error font-bold' : 'text-on-surface-variant'}`}>
+                              {overdue ? 'Overdue · ' : ''}{format(parseISO(deadline), 'dd MMM')}
+                            </span>
+                          )}
+                          {isRepeat && (
+                            <span className="text-xs text-primary font-semibold">
+                              {task.record_count ?? 0}/{task.repeat_count} done
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end md:self-auto flex-shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${sm.cls}`}>
+                        {sm.label}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/tasks')}
+                        className="h-8 px-3 bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider hover:opacity-90"
+                      >
+                        {actionLabel}
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
         </section>
 
         <section className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-3">

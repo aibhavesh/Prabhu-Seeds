@@ -6,6 +6,15 @@ from sqlalchemy.dialects.postgresql import UUID
 from app.core.database import Base
 
 
+class TaskMember(Base):
+    """Junction table — field agents assigned to a group task."""
+    __tablename__ = "task_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+
 class Task(Base):
     __tablename__ = "tasks"
 
@@ -16,9 +25,12 @@ class Task(Base):
     district_id: Mapped[str | None] = mapped_column(String, ForeignKey("districts.id"), nullable=True)
     dept: Mapped[str | None] = mapped_column(String, nullable=True)  # Marketing|Production|R&D|Processing
     activity_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    assignment_type: Mapped[str] = mapped_column(String, default="singular")  # singular|group
     crop: Mapped[str | None] = mapped_column(String, nullable=True)
     product: Mapped[str | None] = mapped_column(String, nullable=True)
     target: Mapped[int] = mapped_column(Integer, default=1)
+    repeat_count: Mapped[int] = mapped_column(Integer, default=1)  # how many times this task must be completed
     unit: Mapped[str] = mapped_column(String, default="NOS")  # NOS|DAYS|KG
     status: Mapped[str] = mapped_column(String, default="assigned")  # assigned|running|hold|completed
     deadline: Mapped[date | None] = mapped_column(Date, nullable=True)

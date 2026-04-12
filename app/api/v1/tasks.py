@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.task import TaskCreate, TaskUpdate, TaskOut, TaskRecordCreate, TaskRecordOut, TaskListResponse
 from app.services import task_service
@@ -27,7 +27,8 @@ async def create_task(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
-    return await task_service.create_task(body, current_user.id, db)
+    task = await task_service.create_task(body, current_user.id, db)
+    return TaskOut.model_validate(task)
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
@@ -41,6 +42,17 @@ async def update_task(
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task(
+    task_id: int,
+    _: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    deleted = await task_service.delete_task(task_id, db)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
 
 @router.post("/{task_id}/records", response_model=TaskRecordOut, status_code=status.HTTP_201_CREATED)

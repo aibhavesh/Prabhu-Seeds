@@ -5,5 +5,9 @@ export const useAuthStore = create((set) => ({
   token: null,  // string or null
 
   setAuth: (user, token) => set({ user, token }),
-  clearAuth: () => set({ user: null, token: null }),
+  clearAuth: () => {
+    // Also clear duty status so timer doesn't bleed into the next session
+    sessionStorage.removeItem('pga-duty-status')
+    set({ user: null, token: null })
+  },
 }))

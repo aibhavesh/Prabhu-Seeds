@@ -68,14 +68,14 @@ function toHeatmapCells(inputDays, monthDate) {
   return cells
 }
 
-export default function AttendanceHeatmap({ days, monthDate }) {
+export default function AttendanceHeatmap({ days, monthDate, title = 'Team Attendance %' }) {
   const cells = useMemo(() => toHeatmapCells(days, monthDate), [days, monthDate])
   const maxWeek = Math.max(...cells.map((c) => c.week), 0)
 
   return (
     <div className="bg-surface-container-lowest shadow-ghost p-4" data-testid="attendance-heatmap">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-black uppercase tracking-widest text-on-surface">Team Attendance %</h3>
+        <h3 className="text-sm font-black uppercase tracking-widest text-on-surface">{title}</h3>
         <span className="text-xs font-medium text-on-surface-variant">{format(monthDate, 'MMMM yyyy')}</span>
       </div>
 
