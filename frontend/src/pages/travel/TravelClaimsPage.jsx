@@ -4,7 +4,8 @@ import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import { format } from 'date-fns'
 import generatePDF from 'react-to-pdf'
 import TaskRouteMap from '@/components/maps/TaskRouteMap'
-import { useTravelClaims } from './hooks/useTravel'
+import toast from 'react-hot-toast'
+import { useTravelClaims, useApproveTravelClaim, useRejectTravelClaim } from './hooks/useTravel'
 import { useAuthStore } from '@/store/authStore'
 import TravelShell from './components/TravelShell'
 import TravelStatusBadge from './components/TravelStatusBadge'
@@ -58,7 +59,9 @@ export default function TravelClaimsPage() {
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [mapClaim, setMapClaim] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
-  const [statusOverrides, setStatusOverrides] = useState({})
+
+  const approveMutation = useApproveTravelClaim()
+  const rejectMutation = useRejectTravelClaim()
 
   const pdfRef = useRef(null)
 
@@ -73,14 +76,9 @@ export default function TravelClaimsPage() {
   const rawClaims = useMemo(() => normalizeClaims(data), [data])
 
   const claims = useMemo(() => {
-    const withLocal = rawClaims.map((claim) => ({
-      ...claim,
-      status: statusOverrides[claim.id] ?? claim.status,
-    }))
-
-    if (statusFilter === 'all') return withLocal
-    return withLocal.filter((claim) => claim.status === statusFilter)
-  }, [rawClaims, statusFilter, statusOverrides])
+    if (statusFilter === 'all') return rawClaims
+    return rawClaims.filter((claim) => claim.status === statusFilter)
+  }, [rawClaims, statusFilter])
 
   const summary = {
     pendingInr: sumAmount(claims, 'pending'),
@@ -140,14 +138,20 @@ export default function TravelClaimsPage() {
     setConfirmAction({ claimId, decision })
   }
 
-  function applyDecision() {
+  async function applyDecision() {
     if (!confirmAction) return
-    setStatusOverrides((prev) => ({
-      ...prev,
-      [confirmAction.claimId]: confirmAction.decision,
-    }))
+    const { claimId, decision } = confirmAction
     setConfirmAction(null)
+    const mutate = decision === 'approved' ? approveMutation : rejectMutation
+    try {
+      await mutate.mutateAsync(claimId)
+      toast.success(`Claim ${decision}.`)
+    } catch {
+      toast.error('Could not update claim. Please try again.')
+    }
   }
+
+  const decisionPending = approveMutation.isPending || rejectMutation.isPending
 
   return (
     <TravelShell
@@ -320,16 +324,16 @@ export default function TravelClaimsPage() {
                             <button
                               type="button"
                               onClick={() => openDecision(claim.id, 'approved')}
-                              className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest bg-primary text-on-primary"
-                              disabled={claim.status === 'approved'}
+                              className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest bg-primary text-on-primary disabled:opacity-50"
+                              disabled={claim.status === 'approved' || decisionPending}
                             >
                               Approve
                             </button>
                             <button
                               type="button"
                               onClick={() => openDecision(claim.id, 'rejected')}
-                              className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest bg-error text-white"
-                              disabled={claim.status === 'rejected'}
+                              className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest bg-error text-white disabled:opacity-50"
+                              disabled={claim.status === 'rejected' || decisionPending}
                             >
                               Reject
                             </button>

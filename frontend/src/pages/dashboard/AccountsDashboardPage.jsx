@@ -1,17 +1,18 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { format } from 'date-fns'
+import { format, subMonths, startOfMonth } from 'date-fns'
+import toast from 'react-hot-toast'
+import { useApproveTravelClaim, useRejectTravelClaim } from '@/pages/travel/hooks/useTravel'
 import generatePDF from 'react-to-pdf'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 import NotificationBell from '@/features/notifications/NotificationBell'
 import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
 
-const MONTH_OPTIONS = [
-  { value: '2023-10', label: 'Oct 2023' },
-  { value: '2023-11', label: 'Nov 2023' },
-  { value: '2023-12', label: 'Dec 2023' },
-]
+const MONTH_OPTIONS = Array.from({ length: 6 }, (_, i) => {
+  const d = startOfMonth(subMonths(new Date(), i))
+  return { value: format(d, 'yyyy-MM'), label: format(d, 'MMM yyyy') }
+})
 
 function formatMoney(value) {
   return `\u20B9${Math.round(Number(value) || 0).toLocaleString('en-IN')}`
@@ -159,10 +160,12 @@ export default function AccountsDashboardPage() {
   const user = useAuthStore((store) => store.user)
   const [statusFilter, setStatusFilter] = useState('all')
   const [departmentFilter, setDepartmentFilter] = useState('all')
-  const [monthFilter, setMonthFilter] = useState('2023-10')
+  const [monthFilter, setMonthFilter] = useState(format(new Date(), 'yyyy-MM'))
   const [page, setPage] = useState(1)
   const [selectedIds, setSelectedIds] = useState([])
-  const [statusOverrides, setStatusOverrides] = useState({})
+
+  const approveMutation = useApproveTravelClaim()
+  const rejectMutation = useRejectTravelClaim()
 
   const pdfRef = useRef(null)
   const pageSize = 4
@@ -179,17 +182,12 @@ export default function AccountsDashboardPage() {
   })
 
   const claims = useMemo(() => {
-    const rows = (claimsQuery.data ?? buildMockClaims()).map((claim) => ({
-      ...claim,
-      status: statusOverrides[claim.id] ?? claim.status,
-    }))
-
-    return rows.filter((claim) => {
+    return (claimsQuery.data ?? buildMockClaims()).filter((claim) => {
       const matchesStatus = statusFilter === 'all' || claim.status === statusFilter
       const matchesDept = departmentFilter === 'all' || claim.department.toLowerCase().includes(departmentFilter)
       return matchesStatus && matchesDept
     })
-  }, [claimsQuery.data, statusFilter, departmentFilter, statusOverrides])
+  }, [claimsQuery.data, statusFilter, departmentFilter])
 
   const pageClaims = useMemo(() => {
     const start = (page - 1) * pageSize
@@ -243,17 +241,18 @@ export default function AccountsDashboardPage() {
     setSelectedIds((current) => Array.from(new Set([...current, ...pageClaims.map((claim) => claim.id)])))
   }
 
-  function applyDecision(claimIds, decision) {
-    setStatusOverrides((current) => {
-      const next = { ...current }
-      claimIds.forEach((claimId) => {
-        next[claimId] = decision
-      })
-      return next
-    })
-
+  async function applyDecision(claimIds, decision) {
     setSelectedIds((current) => current.filter((id) => !claimIds.includes(id)))
+    const mutate = decision === 'approved' ? approveMutation : rejectMutation
+    try {
+      await Promise.all(claimIds.map((id) => mutate.mutateAsync(id)))
+      toast.success(`${claimIds.length > 1 ? `${claimIds.length} claims` : 'Claim'} ${decision}.`)
+    } catch {
+      toast.error('Could not update one or more claims.')
+    }
   }
+
+  const decisionPending = approveMutation.isPending || rejectMutation.isPending
 
   function exportCsv() {
     const header = ['Staff Name', 'Employee ID', 'Department', 'Date', 'Distance', 'PPK Rate', 'Amount', 'Status']
@@ -509,15 +508,17 @@ export default function AccountsDashboardPage() {
                           <button
                             type="button"
                             onClick={() => applyDecision([claim.id], 'rejected')}
-                            className="h-7 w-7 inline-flex items-center justify-center border border-error/40 text-error text-sm"
+                            disabled={claim.status === 'rejected' || decisionPending}
+                            className="h-7 w-7 inline-flex items-center justify-center border border-error/40 text-error text-sm disabled:opacity-50"
                             aria-label={`Reject claim from ${claim.staffName}`}
                           >
-                            x
+                            ✕
                           </button>
                           <button
                             type="button"
                             onClick={() => applyDecision([claim.id], 'approved')}
-                            className="h-7 px-3 bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider"
+                            disabled={claim.status === 'approved' || decisionPending}
+                            className="h-7 px-3 bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
                           >
                             Approve
                           </button>
@@ -575,16 +576,18 @@ export default function AccountsDashboardPage() {
             <button
               type="button"
               onClick={() => applyDecision(selectedIds, 'rejected')}
-              className="h-8 px-3 border border-error/40 text-error text-[10px] font-bold uppercase tracking-wider"
+              disabled={decisionPending}
+              className="h-8 px-3 border border-error/40 text-error text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
             >
               Reject Selected
             </button>
             <button
               type="button"
               onClick={() => applyDecision(selectedIds, 'approved')}
-              className="h-8 px-3 bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider"
+              disabled={decisionPending}
+              className="h-8 px-3 bg-primary text-on-primary text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
             >
-              Approve Selected
+              {decisionPending ? '…' : 'Approve Selected'}
             </button>
           </div>
         </div>

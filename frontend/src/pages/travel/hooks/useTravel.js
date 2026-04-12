@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import apiClient from '@/lib/axios'
 
 function cleanParams(filters = {}) {
@@ -26,5 +26,29 @@ export function useTravelHistory(filters = {}) {
     queryFn: () => apiClient.get('/api/v1/travel', { params }).then((res) => res.data),
     placeholderData: (prev) => prev,
     staleTime: 5 * 60 * 1000,
+  })
+}
+
+function invalidateTravelQueries(queryClient) {
+  queryClient.invalidateQueries({ queryKey: ['travel'] })
+  queryClient.invalidateQueries({ queryKey: ['travel-history'] })
+  queryClient.invalidateQueries({ queryKey: ['accounts-claims'] })
+}
+
+export function useApproveTravelClaim() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (expenseId) =>
+      apiClient.patch(`/api/v1/travel/${expenseId}/approve`).then((r) => r.data),
+    onSuccess: () => invalidateTravelQueries(queryClient),
+  })
+}
+
+export function useRejectTravelClaim() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (expenseId) =>
+      apiClient.patch(`/api/v1/travel/${expenseId}/reject`).then((r) => r.data),
+    onSuccess: () => invalidateTravelQueries(queryClient),
   })
 }

@@ -7,7 +7,8 @@ import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
 import { useDutyStore } from '@/store/dutyStore'
 import { useTasks } from '@/pages/tasks/hooks/useTasks'
-import { useCheckIn, useCheckOut } from '@/pages/attendance/hooks/useAttendance'
+import { useCheckIn, useCheckOut, useMyMonthlyReport } from '@/pages/attendance/hooks/useAttendance'
+import { useTravelHistory } from '@/pages/travel/hooks/useTravel'
 
 function buildMockFieldData() {
   return {
@@ -109,6 +110,10 @@ export default function FieldStaffDashboardPage() {
   const navigate = useNavigate()
   const checkInMutation = useCheckIn()
   const checkOutMutation = useCheckOut()
+
+  const currentMonth = format(new Date(), 'yyyy-MM')
+  const { data: monthlyReport } = useMyMonthlyReport(currentMonth)
+  const { data: travelData } = useTravelHistory({ month: currentMonth })
 
   // Initialise from persisted start time so navigation doesn't reset the clock
   const [elapsedSeconds, setElapsedSeconds] = useState(() =>
@@ -290,16 +295,23 @@ export default function FieldStaffDashboardPage() {
 
           <article className="bg-surface-container-lowest border-l-4 border-secondary px-4 py-4">
             <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">Travel Pay</p>
-            <p className="text-5xl font-black font-headline mt-1">\u20B9{dashboard.kpis.travelPay.toLocaleString('en-IN')}</p>
-            <p className="text-xs text-secondary mt-1">October</p>
+            <p className="text-5xl font-black font-headline mt-1">
+              {travelData == null ? '…' : (() => {
+                const arr = travelData?.claims ?? travelData?.items ?? travelData?.data ?? (Array.isArray(travelData) ? travelData : [])
+                const approved = arr.filter(c => String(c.status).toLowerCase() === 'approved')
+                const total = approved.reduce((s, c) => s + Number(c.amount_inr ?? c.amount ?? 0), 0)
+                return `₹${total.toLocaleString('en-IN')}`
+              })()}
+            </p>
+            <p className="text-xs text-secondary mt-1">{format(new Date(), 'MMMM yyyy')}</p>
           </article>
 
           <article className="bg-surface-container-lowest border-l-4 border-tertiary px-4 py-4">
             <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">Attendance</p>
             <p className="text-5xl font-black font-headline mt-1">
-              {dashboard.kpis.attendanceDays}/{dashboard.kpis.attendanceTotal}
+              {monthlyReport == null ? '…' : `${monthlyReport.present ?? 0}/${new Date().getDate()}`}
             </p>
-            <p className="text-xs text-tertiary mt-1">Days</p>
+            <p className="text-xs text-tertiary mt-1">Days present this month</p>
           </article>
         </section>
 
@@ -393,13 +405,31 @@ export default function FieldStaffDashboardPage() {
         </section>
 
         <section className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-3">
-          <article className="bg-gradient-to-br from-slate-900 via-emerald-950 to-green-900 text-white p-4 min-h-[180px] relative overflow-hidden">
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-36 w-36 rounded-full border-4 border-white/50" />
-            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 material-symbols-outlined text-[64px] opacity-70">location_on</span>
-            <div className="absolute left-4 bottom-4">
-              <p className="text-[10px] uppercase tracking-widest text-white/80">Route Optimized</p>
-              <p className="text-3xl font-black font-headline">Current Sector: Karnal North</p>
-              <p className="text-xs text-white/80 mt-1">Distance: 12.4 km total   ETA: 45 mins</p>
+          <article className="bg-surface-container-lowest p-4">
+            <h3 className="text-2xl font-black font-headline mb-3">Month Summary</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-surface-container-low px-3 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Present Days</p>
+                <p className="text-3xl font-black font-headline mt-1">{monthlyReport?.present ?? '—'}</p>
+              </div>
+              <div className="bg-surface-container-low px-3 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Tasks Completed</p>
+                <p className="text-3xl font-black font-headline mt-1">
+                  {tasksLoading ? '…' : (tasksData?.tasks ?? []).filter(t => t.status === 'completed').length}
+                </p>
+              </div>
+              <div className="bg-surface-container-low px-3 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">KM Travelled</p>
+                <p className="text-3xl font-black font-headline mt-1">
+                  {monthlyReport == null ? '—' : `${Number(monthlyReport.km_total ?? 0).toFixed(1)}`}
+                </p>
+              </div>
+              <div className="bg-surface-container-low px-3 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Pending Tasks</p>
+                <p className="text-3xl font-black font-headline mt-1">
+                  {tasksLoading ? '…' : activeTasks.filter(t => t.status === 'assigned').length}
+                </p>
+              </div>
             </div>
           </article>
 

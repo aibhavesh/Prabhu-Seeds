@@ -187,7 +187,26 @@ export default function LeaveManagementPage() {
       title="Leave Management"
       subtitle="Review team time-off schedules, approvals, and balances."
       rightSlot={
-        <button type="button" className="h-9 px-3 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest inline-flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            if (!teamLeaves.length) return
+            const header = ['Staff Name', 'Type', 'From', 'To', 'Days', 'Status', 'Reason']
+            const lines = teamLeaves.map((r) =>
+              [r.staffName, r.leaveType, r.fromDate, r.toDate, r.durationDays, r.status, r.reason]
+                .map((c) => `"${String(c ?? '').replaceAll('"', '""')}"`)
+                .join(',')
+            )
+            const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `leave-report-${fromDate}-to-${toDate}.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+          }}
+          className="h-9 px-3 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest inline-flex items-center gap-1"
+        >
           <span className="material-symbols-outlined text-[14px]" aria-hidden="true">download</span>
           Export Report
         </button>
