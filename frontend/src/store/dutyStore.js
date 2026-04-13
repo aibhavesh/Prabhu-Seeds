@@ -13,7 +13,7 @@ export const useDutyStore = create(
       checkedIn: false,
       dutyStartedAt: null, // Unix timestamp (ms) or null
 
-      checkIn: () => set({ checkedIn: true, dutyStartedAt: Date.now() }),
+      checkIn: (startedAt) => set({ checkedIn: true, dutyStartedAt: startedAt ?? Date.now() }),
       checkOut: () => set({ checkedIn: false, dutyStartedAt: null }),
     }),
     {

@@ -7,11 +7,23 @@ from app.schemas.leave import LeaveCreate, LeaveUpdate
 from app.services.visibility import get_subordinate_ids
 
 
-async def list_leaves(user: "User", db: AsyncSession, skip: int = 0, limit: int = 100) -> list[Leave]:  # type: ignore[name-defined]
-    sub_ids = await get_subordinate_ids(user.id, db)
+async def list_leaves(
+    user: "User",  # type: ignore[name-defined]
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 200,
+    scope: str | None = None,
+) -> list[Leave]:
     result = await db.execute(select(Leave).offset(skip).limit(limit))
     leaves = list(result.scalars().all())
 
+    # scope=self → only the calling user's own leaves (regardless of role)
+    if scope == "self":
+        return [lv for lv in leaves if lv.user_id == user.id]
+
+    sub_ids = await get_subordinate_ids(user.id, db)
+
+    # OWNER sees all; everyone else sees self + subordinates
     if user.role == "OWNER":
         return leaves
     visible_ids = {user.id, *sub_ids}

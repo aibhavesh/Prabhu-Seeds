@@ -17,9 +17,17 @@ async def list_leaves(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 200,
+    scope: str | None = None,   # "self" | "team"
+    status: str | None = None,  # "pending" | "approved" | "rejected"
+    view: str | None = None,    # reserved for future (history, balances)
 ) -> list:
-    return await leave_service.list_leaves(current_user, db, skip=skip, limit=limit)
+    leaves = await leave_service.list_leaves(
+        current_user, db, skip=skip, limit=limit, scope=scope
+    )
+    if status:
+        leaves = [lv for lv in leaves if lv.status == status]
+    return leaves
 
 
 @router.post("/", response_model=LeaveOut, status_code=status.HTTP_201_CREATED)

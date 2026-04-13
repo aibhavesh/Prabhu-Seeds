@@ -7,8 +7,9 @@ import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
 import { useDutyStore } from '@/store/dutyStore'
 import { useTasks } from '@/pages/tasks/hooks/useTasks'
-import { useCheckIn, useCheckOut, useMyMonthlyReport } from '@/pages/attendance/hooks/useAttendance'
+import { useCheckIn, useCheckOut, useMyMonthlyReport, useMyTodayAttendance } from '@/pages/attendance/hooks/useAttendance'
 import { useTravelHistory } from '@/pages/travel/hooks/useTravel'
+import { useGpsWatcher } from '@/hooks/useGpsWatcher'
 
 function buildMockFieldData() {
   return {
@@ -114,6 +115,10 @@ export default function FieldStaffDashboardPage() {
   const currentMonth = format(new Date(), 'yyyy-MM')
   const { data: monthlyReport } = useMyMonthlyReport(currentMonth)
   const { data: travelData } = useTravelHistory({ month: currentMonth })
+  const { data: todayAttendance } = useMyTodayAttendance()
+
+  // Continuously track position while on duty — posts a waypoint every 100 m or 5 min
+  useGpsWatcher({ attendanceId: todayAttendance?.id ?? null, enabled: checkedIn })
 
   // Initialise from persisted start time so navigation doesn't reset the clock
   const [elapsedSeconds, setElapsedSeconds] = useState(() =>
@@ -171,15 +176,25 @@ export default function FieldStaffDashboardPage() {
     const { lat, lng } = await getGpsPosition()
     if (checkedIn) {
       checkOutMutation.mutate({ lat, lng, km: 0 }, {
-        onSettled: () => { checkOut(); setElapsedSeconds(0) },
+        onSuccess: () => { checkOut(); setElapsedSeconds(0) },
       })
     } else {
       checkInMutation.mutate({ lat, lng }, {
-        onSuccess: () => { checkIn(); setElapsedSeconds(0) },
+        onSuccess: (data) => {
+          const startedAt = data?.check_in ? new Date(data.check_in).getTime() : Date.now()
+          checkIn(startedAt)
+          setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+        },
         onError: (err) => {
-          // Already checked in today — sync local state
+          // Already checked in (state lost after page refresh) — re-sync from server
           const msg = err?.response?.data?.detail ?? ''
-          if (msg.toLowerCase().includes('already')) { checkIn(); setElapsedSeconds(0) }
+          if (msg.toLowerCase().includes('already')) {
+            const startedAt = todayAttendance?.check_in
+              ? new Date(todayAttendance.check_in).getTime()
+              : Date.now()
+            checkIn(startedAt)
+            setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+          }
         },
       })
     }

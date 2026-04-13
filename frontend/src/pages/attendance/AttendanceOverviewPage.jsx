@@ -80,7 +80,10 @@ function formatLiveDuration(seconds) {
 }
 
 function TodayCard({ record }) {
-  const [elapsed, setElapsed] = useState(0)
+  const [elapsed, setElapsed] = useState(() => {
+    if (!record?.check_in || record?.check_out) return 0
+    return Math.floor((Date.now() - new Date(record.check_in).getTime()) / 1000)
+  })
 
   useEffect(() => {
     if (!record?.check_in || record?.check_out) { setElapsed(0); return }

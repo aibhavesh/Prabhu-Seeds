@@ -1,9 +1,9 @@
 import uuid
 import csv
 import io
-from datetime import date as date_type
+from datetime import date as date_type, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, and_
 from sqlalchemy.orm import joinedload
 
 from app.models.task import Task, TaskRecord, TaskMember
@@ -37,10 +37,41 @@ async def _enrich(task: Task, db: AsyncSession) -> TaskOut:
     return out.model_copy(update=updates)
 
 
-async def list_tasks(user: "User", db: AsyncSession, skip: int = 0, limit: int = 100) -> list[Task]:  # type: ignore[name-defined]
-    result = await db.execute(
-        select(Task).options(joinedload(Task.assignee)).offset(skip).limit(limit)
-    )
+async def list_tasks(
+    user: "User",  # type: ignore[name-defined]
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    status: str | None = None,
+    dept: str | None = None,
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[Task]:
+    conditions = []
+    if status:
+        conditions.append(Task.status == status)
+    if dept:
+        conditions.append(Task.dept == dept)
+    if search:
+        conditions.append(Task.title.ilike(f"%{search}%"))
+    if date_from:
+        try:
+            conditions.append(Task.deadline >= datetime.strptime(date_from, "%Y-%m-%d").date())
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            conditions.append(Task.deadline <= datetime.strptime(date_to, "%Y-%m-%d").date())
+        except ValueError:
+            pass
+
+    query = select(Task).options(joinedload(Task.assignee))
+    if conditions:
+        query = query.where(and_(*conditions))
+    query = query.offset(skip).limit(limit)
+
+    result = await db.execute(query)
     tasks = list(result.scalars().all())
 
     if user.role == "OWNER":
@@ -61,8 +92,23 @@ async def list_tasks(user: "User", db: AsyncSession, skip: int = 0, limit: int =
     ]
 
 
-async def list_tasks_with_meta(user: "User", db: AsyncSession, skip: int = 0, limit: int = 100) -> TaskListResponse:  # type: ignore[name-defined]
-    tasks = await list_tasks(user, db, skip=skip, limit=limit)
+async def list_tasks_with_meta(
+    user: "User",  # type: ignore[name-defined]
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    status: str | None = None,
+    dept: str | None = None,
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> TaskListResponse:
+    tasks = await list_tasks(
+        user, db,
+        skip=skip, limit=limit,
+        status=status, dept=dept,
+        search=search, date_from=date_from, date_to=date_to,
+    )
     task_outs = [await _enrich(t, db) for t in tasks]
 
     total = len(task_outs)

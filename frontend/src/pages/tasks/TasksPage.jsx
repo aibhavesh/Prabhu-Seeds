@@ -21,17 +21,18 @@ import TaskDetailSheet from './components/TaskDetailSheet'
 
 const STATUS_TABS = [
   { label: 'All',         value: '' },
-  { label: 'Pending',     value: 'pending' },
-  { label: 'In Progress', value: 'in_progress' },
+  { label: 'Assigned',    value: 'assigned' },
+  { label: 'In Progress', value: 'running' },
+  { label: 'On Hold',     value: 'hold' },
   { label: 'Completed',   value: 'completed' },
 ]
 
 const DEPARTMENTS = [
   'All Departments',
-  'Soil Mgmt',
-  'Irrigation',
-  'Harvesting',
-  'Pest Control',
+  'Marketing',
+  'Production',
+  'R&D',
+  'Processing',
   'Field Ops',
 ]
 
@@ -176,7 +177,7 @@ function buildColumns(onView, onAssign) {
 
 function FilterBar({ params, setParam }) {
   const status = params.get('status') ?? ''
-  const department = params.get('department') ?? ''
+  const dept = params.get('dept') ?? ''
   const dateFrom = params.get('dateFrom') ?? ''
   const dateTo = params.get('dateTo') ?? ''
   const search = params.get('search') ?? ''
@@ -209,9 +210,9 @@ function FilterBar({ params, setParam }) {
         <div className="flex items-center gap-2 md:ml-0">
           <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Department</span>
           <select
-            value={department}
+            value={dept}
             onChange={(e) =>
-              setParam('department', e.target.value === 'All Departments' ? '' : e.target.value)
+              setParam('dept', e.target.value === 'All Departments' ? '' : e.target.value)
             }
             className="bg-surface-container-lowest border-none text-xs font-bold py-1.5 pl-3 pr-8 focus:ring-1 focus:ring-primary min-w-[160px]"
           >
@@ -293,13 +294,13 @@ export default function TasksPage() {
   const user = useAuthStore((s) => s.user)
   const canCreate = ['owner', 'manager'].includes(user?.role)
 
-  // Build filter object from URL params
+  // Build filter object from URL params — keys must match backend query param names
   const filters = {
-    status:     searchParams.get('status') ?? '',
-    department: searchParams.get('department') ?? '',
-    dateFrom:   searchParams.get('dateFrom') ?? '',
-    dateTo:     searchParams.get('dateTo') ?? '',
-    search:     searchParams.get('search') ?? '',
+    status:    searchParams.get('status') ?? '',
+    dept:      searchParams.get('dept') ?? '',
+    date_from: searchParams.get('dateFrom') ?? '',
+    date_to:   searchParams.get('dateTo') ?? '',
+    search:    searchParams.get('search') ?? '',
   }
 
   const { data, isLoading, isError } = useTasks(filters)

@@ -101,6 +101,8 @@ export function useLiveTracking(options = {}) {
   const pollingFallback =
     disableRealtime ||
     !supabaseClient ||
+    realtimeStatus === 'IDLE' ||
+    realtimeStatus === 'CONNECTING' ||
     realtimeStatus === 'CHANNEL_ERROR' ||
     realtimeStatus === 'CLOSED' ||
     realtimeStatus === 'TIMED_OUT'

@@ -17,8 +17,18 @@ async def list_tasks(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
+    status: str | None = None,
+    dept: str | None = None,
+    search: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> TaskListResponse:
-    return await task_service.list_tasks_with_meta(current_user, db, skip=skip, limit=limit)
+    return await task_service.list_tasks_with_meta(
+        current_user, db,
+        skip=skip, limit=limit,
+        status=status, dept=dept,
+        search=search, date_from=date_from, date_to=date_to,
+    )
 
 
 @router.post("/", response_model=TaskOut, status_code=status.HTTP_201_CREATED)

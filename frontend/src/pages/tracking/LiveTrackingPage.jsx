@@ -236,7 +236,6 @@ export default function LiveTrackingPage() {
             <Map
               defaultCenter={INDIA_CENTER}
               defaultZoom={INDIA_ZOOM}
-              mapId={import.meta.env.VITE_GOOGLE_MAP_ID}
               gestureHandling="greedy"
             >
               <MapViewportController target={focusTarget} />
