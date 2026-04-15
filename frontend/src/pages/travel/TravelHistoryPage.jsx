@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import apiClient from '@/lib/axios'
@@ -6,27 +6,30 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
 import { useTravelHistory } from './hooks/useTravel'
 import useTravelJourney from './hooks/useTravelJourney'
-import { downloadTravelSheet } from '@/utils/travelSheet'
+import {
+  getPendingJourneys,
+  addPendingJourney,
+  clearPendingJourneys,
+  printTravelSheet,
+} from '@/utils/travelSheet'
 import TravelShell from './components/TravelShell'
 import TravelStatusBadge from './components/TravelStatusBadge'
 import TravelSkeleton from './components/TravelSkeleton'
 
+// ── Normalise backend response ─────────────────────────────────────────────────
+
 function normalizeHistory(payload) {
   const rows = payload?.claims ?? payload?.items ?? payload?.data ?? []
   if (!Array.isArray(rows)) return []
-
   return rows.map((row, idx) => ({
     id: row.id ?? row.claim_id ?? `history-${idx}`,
     date: row.date ?? row.travel_date ?? row.created_at,
     amountInr: Number(row.amount_inr ?? row.amount ?? 0),
     distanceKm: Number(row.distance_km ?? row.distance ?? row.km ?? 0),
     status: String(row.status ?? 'pending').toLowerCase(),
-    originLabel: row.origin_label ?? row.origin?.label ?? row.origin_city ?? 'Start',
-    destinationLabel: row.destination_label ?? row.destination?.label ?? row.destination_city ?? 'End',
     description: row.description ?? '',
     updates:
-      row.timeline ??
-      [
+      row.timeline ?? [
         { label: 'Claim Submitted', at: row.created_at ?? row.date, state: 'done' },
         {
           label:
@@ -43,6 +46,8 @@ function normalizeHistory(payload) {
   }))
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
 function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -50,6 +55,17 @@ function formatDuration(seconds) {
   if (h > 0) return `${h}h ${m}m`
   if (m > 0) return `${m}m ${s}s`
   return `${s}s`
+}
+
+function Stat({ label, value, highlight }) {
+  return (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{label}</p>
+      <p className={`text-sm font-bold mt-0.5 ${highlight ? 'text-primary text-lg' : 'text-on-surface'}`}>
+        {value}
+      </p>
+    </div>
+  )
 }
 
 function Timeline({ updates }) {
@@ -60,11 +76,7 @@ function Timeline({ updates }) {
         <li key={`${update.label}-${idx}`} className="relative pl-6">
           <span
             className={`absolute left-0 top-1 h-2 w-2 rounded-full ${
-              update.state === 'done'
-                ? 'bg-primary'
-                : update.state === 'blocked'
-                ? 'bg-error'
-                : 'bg-amber-500'
+              update.state === 'done' ? 'bg-primary' : update.state === 'blocked' ? 'bg-error' : 'bg-amber-500'
             }`}
           />
           {idx !== updates.length - 1 && (
@@ -80,49 +92,47 @@ function Timeline({ updates }) {
   )
 }
 
-// ── Journey Tracker Panel ──────────────────────────────────────────────────────
+// ── Journey Tracker ────────────────────────────────────────────────────────────
 
-function JourneyTracker({ user }) {
+function JourneyTracker({ user, onJourneyAdded }) {
   const queryClient = useQueryClient()
   const { active, startTime, totalKm, elapsed, gpsError, start, stop } = useTravelJourney()
+
+  // Completed journey waiting for "Save" action
+  const [completed, setCompleted] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [completed, setCompleted] = useState(null) // { startTime, endTime, totalKm }
+
+  // Pending journeys (accumulated, not yet printed)
+  const [pending, setPending] = useState(() => getPendingJourneys())
+  const [printing, setPrinting] = useState(false)
+
+  const refreshPending = useCallback(() => setPending(getPendingJourneys()), [])
 
   function handleStart() {
     setCompleted(null)
     start()
-    toast.success('Journey started — GPS is now tracking.')
+    toast.success('Journey started — GPS is tracking.')
   }
 
-  async function handleStop() {
+  function handleStop() {
     const endTime = Date.now()
     stop()
     setCompleted({ startTime, endTime, totalKm })
   }
 
-  async function handleDownloadAndSave() {
+  async function handleSave() {
     if (!completed) return
-    const { startTime: st, endTime, totalKm: km } = completed
-
     setSaving(true)
     try {
-      // 1. Download the filled Excel sheet
-      await downloadTravelSheet({
-        startTime: st,
-        endTime,
-        totalKm: km,
-        staffName: user?.name ?? 'staff',
-      })
-
-      // 2. Save claim to backend (expense type=travel)
+      const { startTime: st, endTime, totalKm: km } = completed
       const ratePerKm = 3.25
-      const amount = parseFloat((km * ratePerKm).toFixed(2))
-      const travelDate = format(new Date(st), 'yyyy-MM-dd')
-      const depTime = format(new Date(st), 'HH:mm')
-      const arrTime = format(new Date(endTime), 'HH:mm')
+      const amount    = parseFloat((km * ratePerKm).toFixed(2))
+      const depTime   = format(new Date(st), 'HH:mm')
+      const arrTime   = format(new Date(endTime), 'HH:mm')
 
+      // Save to backend
       await apiClient.post('/api/v1/expenses', {
-        date: travelDate,
+        date: format(new Date(st), 'yyyy-MM-dd'),
         type: 'travel',
         description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
         amount,
@@ -130,114 +140,159 @@ function JourneyTracker({ user }) {
         rate: ratePerKm,
       })
 
+      // Add to local pending list (for sheet accumulation)
+      addPendingJourney(completed)
+      refreshPending()
       queryClient.invalidateQueries({ queryKey: ['travel-history'] })
-      toast.success('Claim saved and sheet downloaded!')
+      onJourneyAdded?.()
+
+      toast.success('Journey saved! It will be included in the next sheet print.')
       setCompleted(null)
     } catch (err) {
-      toast.error(err?.response?.data?.detail ?? 'Failed to save claim.')
+      toast.error(err?.response?.data?.detail ?? 'Failed to save journey.')
     } finally {
       setSaving(false)
     }
   }
 
-  // ── Completed state — show summary + download button
-  if (completed) {
-    const durationSec = Math.floor((completed.endTime - completed.startTime) / 1000)
-    const amount = (completed.totalKm * 3.25).toFixed(2)
-    return (
-      <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-          Journey Complete
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Stat label="Date" value={format(new Date(completed.startTime), 'dd MMM yyyy')} />
-          <Stat label="Departure" value={format(new Date(completed.startTime), 'HH:mm')} />
-          <Stat label="Arrival" value={format(new Date(completed.endTime), 'HH:mm')} />
-          <Stat label="Duration" value={formatDuration(durationSec)} />
-          <Stat label="Distance" value={`${completed.totalKm.toFixed(2)} km`} />
-          <Stat label="Est. Amount" value={`₹${amount}`} />
-        </div>
-        <p className="text-xs text-on-surface-variant">
-          Place of departure, arrival, and place of stay will need to be filled manually in the downloaded sheet.
-        </p>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={handleDownloadAndSave}
-            disabled={saving}
-            className="px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Download Sheet & Save Claim'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setCompleted(null)}
-            className="px-4 py-2 bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-widest"
-          >
-            Discard
-          </button>
-        </div>
-      </div>
-    )
+  async function handlePrint() {
+    if (pending.length === 0) return
+    setPrinting(true)
+    try {
+      await printTravelSheet(user?.name)
+      refreshPending()
+      toast.success('Sheet downloaded! Future journeys will go to a new sheet.')
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to generate sheet.')
+    } finally {
+      setPrinting(false)
+    }
   }
 
-  // ── Active journey state
-  if (active) {
-    return (
-      <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
-            Journey in Progress
+  const totalPendingKm  = pending.reduce((sum, j) => sum + j.totalKm, 0)
+  const totalPendingAmt = (totalPendingKm * 3.25).toFixed(2)
+
+  return (
+    <div className="space-y-3">
+
+      {/* ── Pending sheet summary + Print button ── */}
+      {pending.length > 0 && (
+        <div className="bg-surface-container-lowest shadow-ghost p-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+              Current Sheet
+            </p>
+            <p className="text-sm font-bold text-on-surface mt-0.5">
+              {pending.length} {pending.length === 1 ? 'journey' : 'journeys'} recorded
+              &nbsp;·&nbsp;
+              {totalPendingKm.toFixed(1)} km
+              &nbsp;·&nbsp;
+              ₹{Number(totalPendingAmt).toLocaleString()}
+            </p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {pending.map((j, i) => (
+                <span key={i} className="text-[11px] text-on-surface-variant bg-surface-container-low px-2 py-0.5 rounded-sm">
+                  {format(new Date(j.startTime), 'dd MMM')}
+                  &nbsp;{format(new Date(j.startTime), 'HH:mm')}–{format(new Date(j.endTime), 'HH:mm')}
+                  &nbsp;·&nbsp;{j.totalKm.toFixed(1)} km
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={printing}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[16px]">print</span>
+            {printing ? 'Generating…' : 'Print Sheet'}
+          </button>
+        </div>
+      )}
+
+      {/* ── Completed journey — awaiting save ── */}
+      {completed && (
+        <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4 border-l-4 border-primary">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+            Journey Complete — Save to add to current sheet
           </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Stat label="Date"      value={format(new Date(completed.startTime), 'dd MMM yyyy')} />
+            <Stat label="Departure" value={format(new Date(completed.startTime), 'HH:mm')} />
+            <Stat label="Arrival"   value={format(new Date(completed.endTime), 'HH:mm')} />
+            <Stat label="Duration"  value={formatDuration(Math.floor((completed.endTime - completed.startTime) / 1000))} />
+            <Stat label="Distance"  value={`${completed.totalKm.toFixed(2)} km`} highlight />
+            <Stat label="Est. Amount" value={`₹${(completed.totalKm * 3.25).toFixed(2)}`} />
+          </div>
+          <p className="text-xs text-on-surface-variant">
+            Place of departure, arrival, and place of stay will be filled manually in the sheet.
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save Journey'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCompleted(null)}
+              className="px-4 py-2 bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-widest"
+            >
+              Discard
+            </button>
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          <Stat label="Started" value={startTime ? format(new Date(startTime), 'HH:mm') : '--'} />
-          <Stat label="Distance" value={`${totalKm.toFixed(2)} km`} highlight />
-          <Stat label="Elapsed" value={formatDuration(elapsed)} />
+      )}
+
+      {/* ── Active journey ── */}
+      {active && !completed && (
+        <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+              Journey in Progress
+            </p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <Stat label="Started"  value={startTime ? format(new Date(startTime), 'HH:mm') : '--'} />
+            <Stat label="Distance" value={`${totalKm.toFixed(2)} km`} highlight />
+            <Stat label="Elapsed"  value={formatDuration(elapsed)} />
+          </div>
+          {gpsError && <p className="text-xs text-error font-semibold">{gpsError}</p>}
+          <button
+            type="button"
+            onClick={handleStop}
+            className="px-4 py-2 bg-error text-white text-xs font-bold uppercase tracking-widest"
+          >
+            End Journey
+          </button>
         </div>
-        {gpsError && (
-          <p className="text-xs text-error font-semibold">{gpsError}</p>
-        )}
-        <button
-          type="button"
-          onClick={handleStop}
-          className="px-4 py-2 bg-error text-white text-xs font-bold uppercase tracking-widest"
-        >
-          End Journey
-        </button>
-      </div>
-    )
-  }
+      )}
 
-  // ── Idle state
-  return (
-    <div className="bg-surface-container-lowest shadow-ghost p-4 flex items-center justify-between flex-wrap gap-3">
-      <div>
-        <p className="text-sm font-bold text-on-surface">Start a Journey</p>
-        <p className="text-xs text-on-surface-variant mt-0.5">
-          GPS will track your distance. Download the filled travel claim sheet when done.
-        </p>
-        {gpsError && <p className="text-xs text-error font-semibold mt-1">{gpsError}</p>}
-      </div>
-      <button
-        type="button"
-        onClick={handleStart}
-        className="px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest"
-      >
-        Start Journey
-      </button>
-    </div>
-  )
-}
-
-function Stat({ label, value, highlight }) {
-  return (
-    <div>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{label}</p>
-      <p className={`text-sm font-bold mt-0.5 ${highlight ? 'text-primary text-lg' : 'text-on-surface'}`}>
-        {value}
-      </p>
+      {/* ── Idle — no active journey, no completed one ── */}
+      {!active && !completed && (
+        <div className="bg-surface-container-lowest shadow-ghost p-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-sm font-bold text-on-surface">Start a Journey</p>
+            <p className="text-xs text-on-surface-variant mt-0.5">
+              GPS tracks your distance. Each journey is added to the current sheet until you print.
+            </p>
+            {gpsError && <p className="text-xs text-error font-semibold mt-1">{gpsError}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={handleStart}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest"
+          >
+            <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+            Start Journey
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -245,7 +300,8 @@ function Stat({ label, value, highlight }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TravelHistoryPage() {
-  const user = useAuthStore((s) => s.user)
+  const user  = useAuthStore((s) => s.user)
+  const queryClient = useQueryClient()
   const { data, isLoading, isError } = useTravelHistory({ staffId: user?.id })
   const claims = useMemo(() => normalizeHistory(data), [data])
 
@@ -254,11 +310,13 @@ export default function TravelHistoryPage() {
       title="My Travel"
       subtitle="Track journeys and manage reimbursement claims."
     >
-      {/* Journey Tracker */}
-      <JourneyTracker user={user} />
+      <JourneyTracker
+        user={user}
+        onJourneyAdded={() => queryClient.invalidateQueries({ queryKey: ['travel-history'] })}
+      />
 
-      {/* History */}
-      <div className="space-y-1">
+      {/* ── Claim History ── */}
+      <div className="space-y-1 mt-2">
         <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant px-1">
           Claim History
         </p>
@@ -289,7 +347,7 @@ export default function TravelHistoryPage() {
                         <p className="text-sm font-black font-headline text-on-surface">
                           {claim.description
                             ? claim.description.split('|')[0].trim()
-                            : `${claim.originLabel} → ${claim.destinationLabel}`}
+                            : 'Travel Claim'}
                         </p>
                         {claim.description?.includes('|') && (
                           <p className="text-xs text-on-surface-variant mt-0.5">
