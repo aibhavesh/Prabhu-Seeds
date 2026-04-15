@@ -10,6 +10,8 @@ import { LeaveCardSkeleton, LeavePanelSkeleton } from './components/LeaveSkeleto
 import { useApplyLeave, useMyLeaveBalances, useMyLeaveHistory } from './hooks/useLeaves'
 import { useAuthStore } from '@/store/authStore'
 
+const LEAVE_TYPES = ['casual', 'sick', 'earned', 'unpaid']
+
 const APPLY_LEAVE_SCHEMA = z
   .object({
     fromDate: z.string().min(1, 'From date is required'),
@@ -17,58 +19,76 @@ const APPLY_LEAVE_SCHEMA = z
     leaveType: z
       .string()
       .min(1, 'Leave type is required')
-      .refine((value) => ['casual', 'medical', 'earned'].includes(value), 'Choose a valid leave type'),
+      .refine((value) => LEAVE_TYPES.includes(value), 'Choose a valid leave type'),
     reason: z.string().min(10, 'Reason must be at least 10 characters').max(300, 'Reason cannot exceed 300 characters'),
   })
   .refine((values) => values.toDate >= values.fromDate, {
     path: ['toDate'],
-    message: 'To date must be after from date',
+    message: 'To date must be on or after from date',
   })
 
 function formatInputDate(date) {
   return format(date, 'yyyy-MM-dd')
 }
 
+// Leave quotas per year (business rule — adjust as needed)
+const LEAVE_QUOTAS = { casual: 12, sick: 12, earned: 15, unpaid: 30 }
+
 function normalizeBalances(payload) {
-  const source = payload?.balances ?? payload?.summary ?? payload?.data ?? payload ?? {}
+  // The API returns a plain array of leave objects — compute used days from it
+  const rows = Array.isArray(payload) ? payload
+    : payload?.history ?? payload?.items ?? payload?.leaves ?? payload?.data ?? []
 
-  function readBucket(name) {
-    const nested = source?.[name]
-
-    if (nested && typeof nested === 'object') {
-      return {
-        used: Number(nested.used ?? nested.taken ?? 0),
-        total: Number(nested.total ?? nested.available ?? nested.limit ?? 0),
+  const used = { casual: 0, sick: 0, earned: 0, unpaid: 0 }
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
+      const rowStatus = String(row.status ?? '').toLowerCase()
+      if (rowStatus !== 'approved') continue   // pending / rejected don't reduce balance
+      const type = String(row.leave_type ?? row.type ?? '').toLowerCase()
+      if (type in used) {
+        const days = Number(row.duration_days ?? calcDays(row.from_date, row.to_date))
+        used[type] += days
       }
     }
+  }
 
-    return {
-      used: Number(source?.[`${name}_used`] ?? 0),
-      total: Number(source?.[`${name}_total`] ?? source?.[`${name}_available`] ?? 0),
+  return Object.fromEntries(
+    Object.entries(LEAVE_QUOTAS).map(([type, total]) => [
+      type,
+      { used: used[type] ?? 0, total },
+    ])
+  )
+}
+
+function calcDays(fromDate, toDate, fallback) {
+  try {
+    if (fromDate && toDate) {
+      const diff = Math.round((new Date(toDate) - new Date(fromDate)) / 86400000) + 1
+      if (diff > 0) return diff
     }
-  }
-
-  return {
-    casual: readBucket('casual'),
-    medical: readBucket('medical'),
-    earned: readBucket('earned'),
-  }
+  } catch { /* ignore */ }
+  return fallback ?? 1
 }
 
 function normalizeHistory(payload) {
-  const rows = payload?.history ?? payload?.items ?? payload?.leaves ?? payload?.data ?? payload ?? []
+  const rows = Array.isArray(payload) ? payload
+    : payload?.history ?? payload?.items ?? payload?.leaves ?? payload?.data ?? []
   if (!Array.isArray(rows)) return []
 
-  return rows.map((row, idx) => ({
-    id: row.id ?? row.leave_id ?? `my-leave-${idx}`,
-    fromDate: row.from_date ?? row.start_date ?? row.from ?? row.date,
-    toDate: row.to_date ?? row.end_date ?? row.to ?? row.date,
-    days: Number(row.duration_days ?? row.days ?? 1),
-    leaveType: String(row.leave_type ?? row.type ?? 'casual').toLowerCase(),
-    reason: row.reason ?? row.note ?? '--',
-    status: String(row.status ?? 'pending').toLowerCase(),
-    approvedBy: row.approved_by ?? row.manager_name ?? '--',
-  }))
+  return rows.map((row, idx) => {
+    const fromDate = row.from_date ?? row.start_date ?? row.from ?? row.date
+    const toDate = row.to_date ?? row.end_date ?? row.to ?? row.date
+    return {
+      id: row.id ?? row.leave_id ?? `my-leave-${idx}`,
+      fromDate,
+      toDate,
+      days: Number(row.duration_days ?? calcDays(fromDate, toDate)),
+      leaveType: String(row.leave_type ?? row.type ?? 'casual').toLowerCase(),
+      reason: row.reason ?? row.note ?? '--',
+      status: String(row.status ?? 'pending').toLowerCase(),
+      approvedBy: row.approved_by ?? row.manager_name ?? '--',
+    }
+  })
 }
 
 function percentageLeft(balance) {
@@ -215,8 +235,9 @@ export default function MyLeavesPage() {
                   >
                     <option value="">Select leave type</option>
                     <option value="casual">Casual Leave</option>
-                    <option value="medical">Medical Leave</option>
+                    <option value="sick">Sick / Medical Leave</option>
                     <option value="earned">Earned Leave</option>
+                    <option value="unpaid">Unpaid Leave</option>
                   </select>
                   {errors.leaveType?.message && <p className="mt-1 text-xs text-error">{errors.leaveType.message}</p>}
                 </div>
@@ -254,14 +275,15 @@ export default function MyLeavesPage() {
           </section>
         )}
 
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <section className="grid grid-cols-2 xl:grid-cols-4 gap-4">
           {(balancesQuery.isLoading && !balancesQuery.data) ? (
-            Array.from({ length: 3 }).map((_, idx) => <LeaveCardSkeleton key={idx} />)
+            Array.from({ length: 4 }).map((_, idx) => <LeaveCardSkeleton key={idx} />)
           ) : (
             <>
-              <BalanceCard title="Casual Leave" balance={balances.casual} accentClass="bg-emerald-600" note="Expires end of year" />
-              <BalanceCard title="Medical Leave" balance={balances.medical} accentClass="bg-cyan-600" note="Carryover as per policy" />
-              <BalanceCard title="Earned Leave" balance={balances.earned} accentClass="bg-amber-600" note="Accruing monthly" />
+              <BalanceCard title="Casual Leave"        balance={balances.casual}  accentClass="bg-emerald-600" note="Expires end of year" />
+              <BalanceCard title="Sick / Medical"      balance={balances.sick}    accentClass="bg-cyan-600"    note="Carryover as per policy" />
+              <BalanceCard title="Earned Leave"        balance={balances.earned}  accentClass="bg-amber-600"   note="Accruing monthly" />
+              <BalanceCard title="Unpaid Leave"        balance={balances.unpaid}  accentClass="bg-gray-500"    note="No limit applied" />
             </>
           )}
         </section>

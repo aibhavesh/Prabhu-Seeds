@@ -8,6 +8,8 @@ Creates:
   - 3 ACCOUNTS users(mobile: 9666666666, 9666666665, 9666666664)  — report to manager-1
   - All 54 activity types
 
+Safe to re-run — skips already-created users but always refreshes state/hq.
+
 Usage:
     cd C:/Users/acer/Desktop/Prabhu-Seeds
     venv/Scripts/activate
@@ -29,20 +31,20 @@ from app.models.activity_type import ActivityType
 from app.services.activity_type_service import SEED_ACTIVITY_TYPES
 
 # ── Desired users ──────────────────────────────────────────────────────────────
+# (role, name, mobile, state, hq)
 USERS_TO_SEED = [
-    # role,      name,                 mobile
-    ("OWNER",    "Prabhu Owner",       "9999999999"),
-    ("OWNER",    "Owner Two",          "9999999998"),
-    ("OWNER",    "Owner Three",        "9999999997"),
-    ("MANAGER",  "Demo Manager",       "9888888888"),
-    ("MANAGER",  "Manager Two",        "9888888887"),
-    ("MANAGER",  "Manager Three",      "9888888886"),
-    ("FIELD",    "Field Agent",        "9777777777"),
-    ("FIELD",    "Field Agent Two",    "9777777776"),
-    ("FIELD",    "Field Agent Three",  "9777777775"),
-    ("ACCOUNTS", "Accounts Staff",     "9666666666"),
-    ("ACCOUNTS", "Accounts Staff Two", "9666666665"),
-    ("ACCOUNTS", "Accounts Staff Three","9666666664"),
+    ("OWNER",    "Prabhu Owner",        "9999999999", "Maharashtra",    "Mumbai"),
+    ("OWNER",    "Owner Two",           "9999999998", "Madhya Pradesh", "Bhopal"),
+    ("OWNER",    "Owner Three",         "9999999997", "Chhattisgarh",   "Raipur"),
+    ("MANAGER",  "Demo Manager",        "9888888888", "Maharashtra",    "Pune"),
+    ("MANAGER",  "Manager Two",         "9888888887", "Madhya Pradesh", "Indore"),
+    ("MANAGER",  "Manager Three",       "9888888886", "Chhattisgarh",   "Bilaspur"),
+    ("FIELD",    "Field Agent",         "9777777777", "Maharashtra",    "Nashik"),
+    ("FIELD",    "Field Agent Two",     "9777777776", "Madhya Pradesh", "Jabalpur"),
+    ("FIELD",    "Field Agent Three",   "9777777775", "Chhattisgarh",   "Durg"),
+    ("ACCOUNTS", "Accounts Staff",      "9666666666", "Maharashtra",    "Mumbai"),
+    ("ACCOUNTS", "Accounts Staff Two",  "9666666665", "Madhya Pradesh", "Bhopal"),
+    ("ACCOUNTS", "Accounts Staff Three","9666666664", "Chhattisgarh",   "Raipur"),
 ]
 
 
@@ -58,14 +60,6 @@ async def seed():
             ).all()
         )
 
-        # Count what we already have per role
-        role_counts = {}
-        for role in ("OWNER", "MANAGER", "FIELD", "ACCOUNTS"):
-            cnt = (await db.execute(
-                select(func.count()).select_from(User).where(User.role == role)
-            )).scalar() or 0
-            role_counts[role] = cnt
-
         to_add = [u for u in USERS_TO_SEED if u[2] not in existing_mobiles]
 
         if not to_add:
@@ -73,8 +67,11 @@ async def seed():
         else:
             # First pass: create OWNER + MANAGER so we can get manager-1's id
             owners_managers = [u for u in to_add if u[0] in ("OWNER", "MANAGER")]
-            for role, name, mobile in owners_managers:
-                db.add(User(id=uuid.uuid4(), name=name, mobile=mobile, role=role, is_active=True))
+            for role, name, mobile, state, hq in owners_managers:
+                db.add(User(
+                    id=uuid.uuid4(), name=name, mobile=mobile, role=role,
+                    state=state, hq=hq, is_active=True,
+                ))
             await db.flush()
 
             # Resolve manager-1 id (first manager by mobile desc = highest number)
@@ -85,17 +82,37 @@ async def seed():
 
             # Second pass: FIELD + ACCOUNTS reporting to manager-1
             subordinates = [u for u in to_add if u[0] in ("FIELD", "ACCOUNTS")]
-            for role, name, mobile in subordinates:
+            for role, name, mobile, state, hq in subordinates:
                 db.add(User(
                     id=uuid.uuid4(), name=name, mobile=mobile, role=role,
+                    state=state, hq=hq,
                     manager_id=manager1.id if manager1 else None,
                     is_active=True,
                 ))
 
             await db.commit()
             print(f"Created {len(to_add)} new users:")
-            for role, name, mobile in to_add:
-                print(f"  {role:<10} -> mobile: {mobile}  name: {name}  (OTP: 123456)")
+            for role, name, mobile, state, hq in to_add:
+                print(f"  {role:<10} -> {mobile}  {name}  state={state}  hq={hq}")
+
+        # ── Always refresh state/hq for existing users ─────────────────────────
+        # This ensures re-running the script fixes users created before state was added.
+        state_map = {u[2]: (u[3], u[4]) for u in USERS_TO_SEED}
+        all_users_result = await db.execute(select(User))
+        all_users = all_users_result.scalars().all()
+        updated = 0
+        for user in all_users:
+            if user.mobile in state_map:
+                new_state, new_hq = state_map[user.mobile]
+                if user.state != new_state or user.hq != new_hq:
+                    user.state = new_state
+                    user.hq = new_hq
+                    updated += 1
+        if updated:
+            await db.commit()
+            print(f"Updated state/hq for {updated} existing users.")
+        else:
+            print("State/hq already up to date for all users.")
 
         # ── Activity Types ─────────────────────────────────────────────────────
         count = (await db.execute(select(ActivityType))).scalars().all()
@@ -114,6 +131,10 @@ async def seed():
     print("  MANAGER  : 9888888888 / OTP: 123456")
     print("  FIELD    : 9777777777 / OTP: 123456")
     print("  ACCOUNTS : 9666666666 / OTP: 123456")
+    print("\nState assignments:")
+    print("  Maharashtra    — Field Agent (9777777777),  Manager (9888888888)")
+    print("  Madhya Pradesh — Field Agent Two (9777777776), Manager Two (9888888887)")
+    print("  Chhattisgarh   — Field Agent Three (9777777775), Manager Three (9888888886)")
 
 
 if __name__ == "__main__":

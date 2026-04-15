@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useMap, useMapsLibrary } from '@vis.gl/react-google-maps'
+import { useMap } from '@vis.gl/react-google-maps'
 
 function toInitials(name) {
   const words = String(name ?? '')
@@ -46,7 +46,8 @@ function animatePosition(marker, from, to, maps) {
 
 export default function EmployeeMarker({ employee, onClick }) {
   const map = useMap()
-  const maps = useMapsLibrary('maps')
+  // window.google.maps is fully populated once APIProvider has loaded the script
+  const maps = map ? window.google?.maps : null
 
   const markerRef = useRef(null)
   const infoWindowRef = useRef(null)

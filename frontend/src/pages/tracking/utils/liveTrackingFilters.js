@@ -1,10 +1,24 @@
 import { differenceInMinutes, formatDistanceToNow, isToday } from 'date-fns'
 
 export const DEPARTMENT_COLORS = {
-  marketing: '#0d631b',
-  production: '#2563eb',
-  'r&d': '#ea580c',
-  processing: '#7c3aed',
+  marketing:    '#0d631b',
+  production:   '#2563eb',
+  'r&d':        '#ea580c',
+  processing:   '#7c3aed',
+  'field ops':  '#0d631b',
+  management:   '#2563eb',
+  accounts:     '#ea580c',
+  hq:           '#7c3aed',
+}
+
+/** Group an array of objects by a string key. */
+export function groupByKey(arr, key) {
+  return arr.reduce((acc, item) => {
+    const k = item[key] ?? '—'
+    if (!acc[k]) acc[k] = []
+    acc[k].push(item)
+    return acc
+  }, {})
 }
 
 export function departmentColor(department) {

@@ -88,7 +88,7 @@ if errorlevel 1 (
 echo  Docker ... OK
 echo.
 echo  Starting PostgreSQL + Redis containers...
-docker-compose -f docker-compose.dev.yml up -d
+docker-compose -f backend\docker-compose.dev.yml up -d
 if errorlevel 1 (
     echo  ERROR: Failed to start containers. Check Docker Desktop logs.
     pause & exit /b 1
@@ -96,7 +96,7 @@ if errorlevel 1 (
 echo.
 echo  Waiting for PostgreSQL to be ready...
 :wait_pg
-docker-compose -f docker-compose.dev.yml exec -T postgres pg_isready -U pgauser -d prabhu_seeds > nul 2>&1
+docker-compose -f backend\docker-compose.dev.yml exec -T postgres pg_isready -U pgauser -d prabhu_seeds > nul 2>&1
 if errorlevel 1 (
     timeout /t 2 /nobreak > nul
     goto :wait_pg
@@ -106,13 +106,13 @@ echo  PostgreSQL is ready!
 :: ─── 4. PYTHON VENV + PACKAGES ───────────────────────────────────────────────
 echo.
 echo [4/7] Setting up Python environment...
-if not exist "venv\" (
+if not exist "backend\venv\" (
     echo  Creating virtual environment...
-    python -m venv venv
+    python -m venv backend\venv
 )
-call venv\Scripts\activate.bat
+call backend\venv\Scripts\activate.bat
 echo  Installing Python packages (may take a minute)...
-pip install -r requirements.txt -q
+pip install -r backend\requirements.txt -q
 if errorlevel 1 (
     echo  ERROR: pip install failed.
     pause & exit /b 1
@@ -123,10 +123,10 @@ echo  Python packages ... OK
 echo.
 echo [5/7] Creating config files...
 
-if not exist ".env" (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\setup-env.ps1"
+if not exist "backend\.env" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "backend\scripts\setup-env.ps1"
 ) else (
-    echo  .env already exists, skipping.
+    echo  backend/.env already exists, skipping.
 )
 
 if not exist "frontend\.env" (
@@ -140,19 +140,22 @@ if not exist "frontend\.env" (
 echo.
 echo [6/7] Setting up database...
 echo  Running migrations...
+cd /d "%~dp0backend"
 alembic upgrade head
 if errorlevel 1 (
-    echo  ERROR: Migrations failed. Check that PostgreSQL is running and .env is correct.
+    echo  ERROR: Migrations failed. Check that PostgreSQL is running and backend\.env is correct.
+    cd /d "%~dp0"
     pause & exit /b 1
 )
 echo  Migrations ... OK
 echo.
 echo  Seeding demo accounts...
-python scripts/seed_dev.py
+python scripts\seed_dev.py
 if errorlevel 1 (
     echo  NOTE: Seed returned a warning (accounts may already exist — this is OK).
 )
 echo  Seed ... OK
+cd /d "%~dp0"
 
 :: ─── 7. FRONTEND PACKAGES ────────────────────────────────────────────────────
 echo.

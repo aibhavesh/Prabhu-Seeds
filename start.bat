@@ -30,14 +30,14 @@ echo.
 
 :: Start DB + Redis containers
 echo  [1/3] Starting database containers...
-docker-compose -f docker-compose.dev.yml up -d > nul 2>&1
+docker-compose -f backend\docker-compose.dev.yml up -d > nul 2>&1
 
 :: Brief wait for containers
 timeout /t 3 /nobreak > nul
 
 :: Start backend in a new window
 echo  [2/3] Starting backend  (http://localhost:8000)...
-start "PGA Backend" cmd /k "cd /d "%~dp0" && call venv\Scripts\activate && uvicorn app.main:app --reload --port 8000"
+start "PGA Backend" cmd /k "cd /d "%~dp0backend" && call venv\Scripts\activate && uvicorn app.main:app --reload --port 8000"
 
 :: Start frontend in a new window
 echo  [3/3] Starting frontend (http://localhost:5173)...

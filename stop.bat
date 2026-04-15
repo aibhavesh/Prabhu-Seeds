@@ -6,7 +6,7 @@ cd /d "%~dp0"
 
 echo.
 echo  Stopping PGA AgriTask database containers...
-docker-compose -f docker-compose.dev.yml stop
+docker-compose -f backend\docker-compose.dev.yml stop
 echo  Done. Your data is preserved — run start.bat to resume.
 echo.
 pause

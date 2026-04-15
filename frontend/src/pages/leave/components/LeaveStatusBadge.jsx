@@ -7,8 +7,10 @@ const STATUS_STYLE = {
 
 const TYPE_STYLE = {
   casual: 'bg-emerald-100 text-emerald-800',
-  medical: 'bg-cyan-100 text-cyan-800',
+  sick:   'bg-cyan-100 text-cyan-800',
+  medical:'bg-cyan-100 text-cyan-800',   // legacy alias
   earned: 'bg-amber-100 text-amber-800',
+  unpaid: 'bg-slate-200 text-slate-700',
 }
 
 function pretty(value) {

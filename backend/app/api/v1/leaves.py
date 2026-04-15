@@ -36,7 +36,10 @@ async def create_leave(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
-    return await leave_service.create_leave(body, current_user.id, db)
+    try:
+        return await leave_service.create_leave(body, current_user.id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
 
 @router.patch("/{leave_id}/status", response_model=LeaveOut)
