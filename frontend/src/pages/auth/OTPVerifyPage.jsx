@@ -80,7 +80,7 @@ export default function OTPVerifyPage() {
         {
           loading: 'Resending OTP…',
           success: 'OTP resent!',
-          error: (err) => err.response?.data?.message ?? 'Failed to resend OTP',
+          error: (err) => err.response?.data?.detail ?? err.response?.data?.message ?? 'Failed to resend OTP',
         }
       )
       setOtp(Array(OTP_LENGTH).fill(''))
@@ -105,7 +105,7 @@ export default function OTPVerifyPage() {
         {
           loading: 'Verifying…',
           success: 'Verified!',
-          error: (err) => err.response?.data?.message ?? 'Invalid OTP',
+          error: (err) => err.response?.data?.detail ?? err.response?.data?.message ?? 'Invalid OTP',
         }
       )
       setAuth(data.user, data.token)

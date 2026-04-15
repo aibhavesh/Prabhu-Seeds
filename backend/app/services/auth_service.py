@@ -20,7 +20,18 @@ def create_access_token(user: User) -> str:
     return jwt.encode(payload, settings.effective_jwt_secret, algorithm=settings.JWT_ALGORITHM)
 
 
+def _normalize_mobile(mobile: str) -> str:
+    """Strip country code prefix — store and compare as 10-digit number."""
+    mobile = mobile.strip()
+    if mobile.startswith("+91"):
+        mobile = mobile[3:]
+    elif mobile.startswith("91") and len(mobile) == 12:
+        mobile = mobile[2:]
+    return mobile
+
+
 async def initiate_otp(mobile: str, db: AsyncSession) -> dict:
+    mobile = _normalize_mobile(mobile)
     result = await db.execute(select(User).where(User.mobile == mobile))
     user = result.scalar_one_or_none()
     if not user:
@@ -34,6 +45,7 @@ async def initiate_otp(mobile: str, db: AsyncSession) -> dict:
 
 
 async def verify_and_login(mobile: str, otp: str, db: AsyncSession) -> dict:
+    mobile = _normalize_mobile(mobile)
     valid = await verify_otp(mobile, otp)
     if not valid:
         return {"success": False, "message": "Invalid or expired OTP"}

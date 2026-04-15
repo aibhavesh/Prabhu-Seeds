@@ -19,7 +19,7 @@ export default function MobileInputPage() {
         {
           loading: 'Sending OTP…',
           success: 'OTP sent!',
-          error: (err) => err.response?.data?.message ?? 'Failed to send OTP',
+          error: (err) => err.response?.data?.detail ?? err.response?.data?.message ?? 'Failed to send OTP',
         }
       )
       navigate('/auth/verify', { state: { mobile } })
