@@ -18,7 +18,10 @@ async def send_otp(
     body: OTPSendRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    result = await auth_service.initiate_otp(body.mobile, db)
+    try:
+        result = await auth_service.initiate_otp(body.mobile, db)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     if not result["success"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["message"])
     return {"message": result["message"]}
@@ -30,7 +33,10 @@ async def verify_otp(
     body: OTPVerifyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
-    result = await auth_service.verify_and_login(body.mobile, body.otp, db)
+    try:
+        result = await auth_service.verify_and_login(body.mobile, body.otp, db)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     if not result["success"]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=result["message"])
     return TokenResponse(**result)

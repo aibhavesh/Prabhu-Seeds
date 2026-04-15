@@ -1,50 +1,57 @@
-/**
- * Travel claim sheet utilities.
- *
- * Pending journeys are stored in localStorage under PENDING_KEY.
- * Each journey = { startTime, endTime, totalKm }
- *
- * printTravelSheet() fills all pending journeys into the template,
- * downloads the xlsx, then clears the pending list.
- */
 import * as XLSX from 'xlsx'
-import { format } from 'date-fns'
+import { format, isValid } from 'date-fns'
 
-const TEMPLATE_URL = '/templates/travel-claim.xlsx'
-const PENDING_KEY  = 'travel_pending_journeys'
-const DATA_START_ROW = 11   // first data row in template
+const TEMPLATE_URL    = '/templates/travel-claim.xlsx'
+const PENDING_KEY     = 'travel_pending_journeys'
+const DATA_START_ROW  = 11
+export const RATE_PER_KM = 3.25
 
 // ── Pending journey storage ────────────────────────────────────────────────────
 
 export function getPendingJourneys() {
   try {
-    return JSON.parse(localStorage.getItem(PENDING_KEY) ?? '[]')
+    const raw = localStorage.getItem(PENDING_KEY)
+    if (!raw) return []
+    const list = JSON.parse(raw)
+    if (!Array.isArray(list)) return []
+    // Validate each entry has valid timestamps and km
+    return list.filter(
+      (j) =>
+        typeof j.startTime === 'number' &&
+        typeof j.endTime   === 'number' &&
+        typeof j.totalKm   === 'number' &&
+        isValid(new Date(j.startTime)) &&
+        isValid(new Date(j.endTime)),
+    )
   } catch {
     return []
   }
 }
 
 export function addPendingJourney(journey) {
-  const list = getPendingJourneys()
-  list.push(journey)
-  localStorage.setItem(PENDING_KEY, JSON.stringify(list))
+  try {
+    const list = getPendingJourneys()
+    list.push(journey)
+    localStorage.setItem(PENDING_KEY, JSON.stringify(list))
+  } catch (e) {
+    // localStorage full or unavailable — throw so caller can surface it
+    throw new Error('Could not save journey locally. Storage may be full.')
+  }
 }
 
 export function clearPendingJourneys() {
-  localStorage.removeItem(PENDING_KEY)
+  try { localStorage.removeItem(PENDING_KEY) } catch { /* ignore */ }
 }
 
 // ── Sheet generation ───────────────────────────────────────────────────────────
 
 /**
- * Downloads the travel claim xlsx filled with all pending journeys,
- * then clears the pending list.
- *
- * @param {string} staffName - used in filename
+ * Fills the travel claim template with all pending journeys and downloads it.
+ * Clears the pending list ONLY after the file is ready to write (minimises data loss).
  */
 export async function printTravelSheet(staffName) {
   const journeys = getPendingJourneys()
-  if (journeys.length === 0) throw new Error('No journeys recorded yet.')
+  if (journeys.length === 0) throw new Error('No journeys queued for printing yet.')
 
   const res = await fetch(TEMPLATE_URL)
   if (!res.ok) throw new Error('Could not load travel claim template.')
@@ -54,50 +61,49 @@ export async function printTravelSheet(staffName) {
   const ws = wb.Sheets[wb.SheetNames[0]]
 
   journeys.forEach((journey, index) => {
-    const row = DATA_START_ROW + index
+    const row       = DATA_START_ROW + index
     const startDate = new Date(journey.startTime)
     const endDate   = new Date(journey.endTime)
-    const km        = parseFloat(journey.totalKm.toFixed(2))
+    const km        = parseFloat(Math.max(0, journey.totalKm).toFixed(2))
+
+    // Guard invalid dates
+    if (!isValid(startDate) || !isValid(endDate)) return
 
     setCellText(ws, `B${row}`, format(startDate, 'dd/MM/yyyy'))
     setCellText(ws, `C${row}`, format(startDate, 'HH:mm'))
     setCellText(ws, `E${row}`, format(endDate,   'dd/MM/yyyy'))
     setCellText(ws, `F${row}`, format(endDate,   'HH:mm'))
 
-    // Opening = 0, Closing = km → formula K=J-I gives correct km
+    // I = opening odometer (0), J = closing (km) → K formula = J-I = km
     setCellNumber(ws, `I${row}`, 0)
     setCellNumber(ws, `J${row}`, km)
 
-    // Row 11 has K hardcoded (value 1), not a formula — overwrite directly
+    // Row 11 has K hardcoded (not a formula) — overwrite it directly
     if (row === DATA_START_ROW) {
       setCellNumber(ws, `K${row}`, km)
     }
-    // Rows 12+ already have K=J-I formula, Excel recalculates on open
+    // Rows 12+ have K=J-I formula — Excel recalculates on open
   })
 
-  const firstDate = format(new Date(journeys[0].startTime), 'yyyy-MM-dd')
-  const lastDate  = format(new Date(journeys[journeys.length - 1].startTime), 'yyyy-MM-dd')
-  const name      = (staffName ?? 'staff').replace(/\s+/g, '-')
-  const filename  = `travel-claim_${name}_${firstDate}_to_${lastDate}.xlsx`
+  // Build filename from first and last journey date
+  const first    = new Date(journeys[0].startTime)
+  const last     = new Date(journeys[journeys.length - 1].startTime)
+  const name     = (staffName ?? 'staff').replace(/\s+/g, '-')
+  const fromStr  = isValid(first) ? format(first, 'yyyy-MM-dd') : 'unknown'
+  const toStr    = isValid(last)  ? format(last,  'yyyy-MM-dd') : 'unknown'
+  const filename = `travel-claim_${name}_${fromStr}_to_${toStr}.xlsx`
 
-  XLSX.writeFile(wb, filename)
+  // Clear BEFORE writeFile — if writeFile throws the file was never created anyway
   clearPendingJourneys()
+  XLSX.writeFile(wb, filename)
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Cell helpers ───────────────────────────────────────────────────────────────
 
 function setCellText(ws, addr, value) {
-  if (!ws[addr]) ws[addr] = {}
-  ws[addr].t = 's'
-  ws[addr].v = value
-  ws[addr].w = value
-  delete ws[addr].f
+  ws[addr] = { t: 's', v: value, w: value }
 }
 
 function setCellNumber(ws, addr, value) {
-  if (!ws[addr]) ws[addr] = {}
-  ws[addr].t = 'n'
-  ws[addr].v = value
-  ws[addr].w = String(value)
-  delete ws[addr].f
+  ws[addr] = { t: 'n', v: value, w: String(value) }
 }

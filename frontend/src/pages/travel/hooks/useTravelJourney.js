@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 const STORAGE_KEY = 'travel_journey_active'
+const MIN_DELTA_KM = 0.01  // ignore GPS jitter < 10 m
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371
@@ -17,7 +18,14 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 function loadPersistedJourney() {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    // Validate shape before trusting it
+    if (
+      typeof parsed?.startTime !== 'number' ||
+      typeof parsed?.totalKm !== 'number'
+    ) return null
+    return parsed
   } catch {
     return null
   }
@@ -27,94 +35,109 @@ function persistJourney(state) {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   } catch {
-    // ignore storage errors
+    // storage unavailable — ignore
   }
 }
 
 function clearPersistedJourney() {
-  sessionStorage.removeItem(STORAGE_KEY)
+  try { sessionStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
 }
 
 export default function useTravelJourney() {
   const persisted = loadPersistedJourney()
 
-  const [active, setActive] = useState(!!persisted)
+  const [active, setActive]       = useState(!!persisted)
   const [startTime, setStartTime] = useState(persisted?.startTime ?? null)
-  const [totalKm, setTotalKm] = useState(persisted?.totalKm ?? 0)
-  const [elapsed, setElapsed] = useState(0)
-  const [gpsError, setGpsError] = useState(null)
+  const [totalKm, setTotalKm]     = useState(persisted?.totalKm ?? 0)
+  const [elapsed, setElapsed]     = useState(0)
+  const [gpsError, setGpsError]   = useState(null)
 
-  const watchIdRef = useRef(null)
-  const lastPosRef = useRef(persisted?.lastPos ?? null)
-  const totalKmRef = useRef(persisted?.totalKm ?? 0)
+  const watchIdRef   = useRef(null)
+  const lastPosRef   = useRef(persisted?.lastPos ?? null)
+  const totalKmRef   = useRef(persisted?.totalKm ?? 0)
+  // Store startTime in a ref too — safe to read inside GPS callback without stale closure risk
+  const startTimeRef = useRef(persisted?.startTime ?? null)
 
-  // Live elapsed timer
+  // ── Live elapsed timer ────────────────────────────────────────────────────
   useEffect(() => {
-    if (!active || !startTime) return
+    if (!active || !startTimeRef.current) return
     const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTime) / 1000))
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
     }, 1000)
     return () => clearInterval(id)
-  }, [active, startTime])
+  }, [active])
 
+  // ── GPS watch ─────────────────────────────────────────────────────────────
   const startWatching = useCallback(() => {
     if (!navigator.geolocation) {
       setGpsError('GPS not available on this device.')
       return
     }
+    // Prevent double-watch
+    if (watchIdRef.current !== null) return
+
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords
         setGpsError(null)
+
         if (lastPosRef.current) {
-          const delta = haversineKm(
-            lastPosRef.current.lat,
-            lastPosRef.current.lng,
-            lat,
-            lng,
-          )
-          // ignore jitter < 0.01 km (10 m)
-          if (delta >= 0.01) {
-            totalKmRef.current = totalKmRef.current + delta
+          const delta = haversineKm(lastPosRef.current.lat, lastPosRef.current.lng, lat, lng)
+          if (delta >= MIN_DELTA_KM) {
+            totalKmRef.current += delta
             setTotalKm(totalKmRef.current)
             lastPosRef.current = { lat, lng }
-            // update persisted km so refresh doesn't lose distance
             persistJourney({
-              startTime,
+              startTime: startTimeRef.current,
               totalKm: totalKmRef.current,
               lastPos: { lat, lng },
             })
           }
         } else {
           lastPosRef.current = { lat, lng }
+          persistJourney({
+            startTime: startTimeRef.current,
+            totalKm: totalKmRef.current,
+            lastPos: { lat, lng },
+          })
         }
       },
-      (err) => {
-        setGpsError(`GPS error: ${err.message}`)
-      },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 },
+      (err) => setGpsError(`GPS error: ${err.message}`),
+      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 30_000 },
     )
-  }, [startTime])
+  }, []) // no deps — reads everything from refs, never stale
 
+  // ── Start ─────────────────────────────────────────────────────────────────
   const start = useCallback(() => {
     const now = Date.now()
+
+    // Reset refs synchronously before setting state
+    totalKmRef.current  = 0
+    lastPosRef.current  = null
+    startTimeRef.current = now
+
     setActive(true)
     setStartTime(now)
     setTotalKm(0)
     setElapsed(0)
-    totalKmRef.current = 0
-    lastPosRef.current = null
+    setGpsError(null)
+
     persistJourney({ startTime: now, totalKm: 0, lastPos: null })
-    // get initial position
+
+    // Grab initial position
     navigator.geolocation?.getCurrentPosition(
       (pos) => {
         lastPosRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        persistJourney({ startTime: now, totalKm: 0, lastPos: lastPosRef.current })
       },
       () => {},
-      { enableHighAccuracy: true, timeout: 15000 },
+      { enableHighAccuracy: true, timeout: 15_000 },
     )
-  }, [])
 
+    startWatching()
+  }, [startWatching])
+
+  // ── Stop ──────────────────────────────────────────────────────────────────
   const stop = useCallback(() => {
     if (watchIdRef.current !== null) {
       navigator.geolocation?.clearWatch(watchIdRef.current)
@@ -124,31 +147,19 @@ export default function useTravelJourney() {
     clearPersistedJourney()
   }, [])
 
-  // Resume watching on mount if journey was active
+  // ── Resume GPS watch on mount if journey was persisted ────────────────────
   useEffect(() => {
-    if (active && startTime) startWatching()
+    if (persisted && active) {
+      startWatching()
+    }
     return () => {
       if (watchIdRef.current !== null) {
         navigator.geolocation?.clearWatch(watchIdRef.current)
+        watchIdRef.current = null
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, []) // intentionally run once on mount only
 
-  // Start watching once start() sets active=true
-  useEffect(() => {
-    if (active && watchIdRef.current === null && startTime) {
-      startWatching()
-    }
-  }, [active, startTime, startWatching])
-
-  return {
-    active,
-    startTime,
-    totalKm,
-    elapsed,
-    gpsError,
-    start,
-    stop,
-  }
+  return { active, startTime, totalKm, elapsed, gpsError, start, stop }
 }

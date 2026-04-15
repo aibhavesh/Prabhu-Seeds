@@ -21,13 +21,15 @@ def create_access_token(user: User) -> str:
 
 
 def _normalize_mobile(mobile: str) -> str:
-    """Strip country code prefix — store and compare as 10-digit number."""
-    mobile = mobile.strip()
-    if mobile.startswith("+91"):
-        mobile = mobile[3:]
-    elif mobile.startswith("91") and len(mobile) == 12:
-        mobile = mobile[2:]
-    return mobile
+    """Strip country code and non-digits, return 10-digit number or raise."""
+    # Keep only digits
+    digits = ''.join(c for c in mobile if c.isdigit())
+    # Strip 91 prefix if 12 digits (country code included)
+    if len(digits) == 12 and digits.startswith('91'):
+        digits = digits[2:]
+    if len(digits) != 10:
+        raise ValueError(f"Invalid mobile number '{mobile}'. Expected 10 digits.")
+    return digits
 
 
 async def initiate_otp(mobile: str, db: AsyncSession) -> dict:

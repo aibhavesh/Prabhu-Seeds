@@ -9,8 +9,8 @@ import useTravelJourney from './hooks/useTravelJourney'
 import {
   getPendingJourneys,
   addPendingJourney,
-  clearPendingJourneys,
   printTravelSheet,
+  RATE_PER_KM,
 } from '@/utils/travelSheet'
 import TravelShell from './components/TravelShell'
 import TravelStatusBadge from './components/TravelStatusBadge'
@@ -18,32 +18,39 @@ import TravelSkeleton from './components/TravelSkeleton'
 
 // ── Normalise backend response ─────────────────────────────────────────────────
 
+function safeNumber(value, fallback = 0) {
+  const n = Number(value)
+  return isFinite(n) ? n : fallback
+}
+
 function normalizeHistory(payload) {
   const rows = payload?.claims ?? payload?.items ?? payload?.data ?? []
   if (!Array.isArray(rows)) return []
-  return rows.map((row, idx) => ({
-    id: row.id ?? row.claim_id ?? `history-${idx}`,
-    date: row.date ?? row.travel_date ?? row.created_at,
-    amountInr: Number(row.amount_inr ?? row.amount ?? 0),
-    distanceKm: Number(row.distance_km ?? row.distance ?? row.km ?? 0),
-    status: String(row.status ?? 'pending').toLowerCase(),
-    description: row.description ?? '',
-    updates:
-      row.timeline ?? [
-        { label: 'Claim Submitted', at: row.created_at ?? row.date, state: 'done' },
-        {
-          label:
-            row.status === 'approved'
-              ? 'Approved by Accounts'
-              : row.status === 'rejected'
-              ? 'Rejected by Accounts'
-              : 'Under Review',
-          at: row.updated_at ?? row.date,
-          state:
-            row.status === 'pending' ? 'active' : row.status === 'approved' ? 'done' : 'blocked',
-        },
-      ],
-  }))
+  return rows.map((row, idx) => {
+    const status = String(row.status ?? 'pending').toLowerCase()
+    return {
+      id: row.id ?? row.claim_id ?? `history-${idx}`,
+      date: row.date ?? row.travel_date ?? row.created_at,
+      amountInr: safeNumber(row.amount_inr ?? row.amount),
+      distanceKm: safeNumber(row.distance_km ?? row.distance ?? row.km),
+      status,
+      description: row.description ?? '',
+      updates:
+        row.timeline ?? [
+          { label: 'Claim Submitted', at: row.created_at ?? row.date, state: 'done' },
+          {
+            label:
+              status === 'approved'
+                ? 'Approved by Accounts'
+                : status === 'rejected'
+                ? 'Rejected by Accounts'
+                : 'Under Review',
+            at: row.updated_at ?? row.date,
+            state: status === 'approved' ? 'done' : status === 'rejected' ? 'blocked' : 'active',
+          },
+        ],
+    }
+  })
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -115,6 +122,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
   }
 
   function handleStop() {
+    if (!startTime) return   // guard: can't stop a journey that never started
     const endTime = Date.now()
     stop()
     setCompleted({ startTime, endTime, totalKm })
@@ -125,10 +133,9 @@ function JourneyTracker({ user, onJourneyAdded }) {
     setSaving(true)
     try {
       const { startTime: st, endTime, totalKm: km } = completed
-      const ratePerKm = 3.25
-      const amount    = parseFloat((km * ratePerKm).toFixed(2))
-      const depTime   = format(new Date(st), 'HH:mm')
-      const arrTime   = format(new Date(endTime), 'HH:mm')
+      const amount  = parseFloat((km * RATE_PER_KM).toFixed(2))
+      const depTime = format(new Date(st), 'HH:mm')
+      const arrTime = format(new Date(endTime), 'HH:mm')
 
       // Save to backend
       await apiClient.post('/api/v1/expenses', {
@@ -137,7 +144,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
         description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
         amount,
         km: parseFloat(km.toFixed(2)),
-        rate: ratePerKm,
+        rate: RATE_PER_KM,
       })
 
       // Add to local pending list (for sheet accumulation)
@@ -170,7 +177,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
   }
 
   const totalPendingKm  = pending.reduce((sum, j) => sum + j.totalKm, 0)
-  const totalPendingAmt = (totalPendingKm * 3.25).toFixed(2)
+  const totalPendingAmt = (totalPendingKm * RATE_PER_KM).toFixed(2)
 
   return (
     <div className="space-y-3">
@@ -223,7 +230,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
             <Stat label="Arrival"   value={format(new Date(completed.endTime), 'HH:mm')} />
             <Stat label="Duration"  value={formatDuration(Math.floor((completed.endTime - completed.startTime) / 1000))} />
             <Stat label="Distance"  value={`${completed.totalKm.toFixed(2)} km`} highlight />
-            <Stat label="Est. Amount" value={`₹${(completed.totalKm * 3.25).toFixed(2)}`} />
+            <Stat label="Est. Amount" value={`₹${(completed.totalKm * RATE_PER_KM).toFixed(2)}`} />
           </div>
           <p className="text-xs text-on-surface-variant">
             Place of departure, arrival, and place of stay will be filled manually in the sheet.
