@@ -92,10 +92,11 @@ async def check_out(user_id: uuid.UUID, data: CheckOutRequest, db: AsyncSession)
     )
     if len(all_wps) >= 2:
         coords = [(float(w.lat), float(w.lng)) for w in all_wps]
-        computed_km = calculate_route_km(coords)
+        # Only count legs >= 100 m — filters GPS drift from stationary heartbeats
+        computed_km = calculate_route_km(coords, min_leg_m=100)
     else:
-        # Only one waypoint (check-in = check-out spot) — use client value as fallback
-        computed_km = float(data.km)
+        # Only one waypoint (check-in = check-out spot) — no movement
+        computed_km = 0.0
 
     attendance.check_out = checkout_time
     attendance.km = Decimal(str(computed_km))

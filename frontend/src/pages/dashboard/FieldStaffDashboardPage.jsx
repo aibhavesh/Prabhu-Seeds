@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format, parseISO, isPast } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
@@ -109,8 +110,10 @@ export default function FieldStaffDashboardPage() {
   const user = useAuthStore((store) => store.user)
   const { checkedIn, dutyStartedAt, checkIn, checkOut } = useDutyStore()
   const navigate = useNavigate()
-  const checkInMutation = useCheckIn()
+  const checkInMutation  = useCheckIn()
   const checkOutMutation = useCheckOut()
+  const gpsLoadingRef    = useRef(false)
+  const [gpsLoading, setGpsLoading] = useState(false)
 
   const currentMonth = format(new Date(), 'yyyy-MM')
   const { data: monthlyReport } = useMyMonthlyReport(currentMonth)
@@ -173,10 +176,23 @@ export default function FieldStaffDashboardPage() {
   }
 
   async function toggleDuty() {
-    const { lat, lng } = await getGpsPosition()
+    // Prevent double-tap during GPS fetch or mutation
+    if (gpsLoadingRef.current) return
+    gpsLoadingRef.current = true
+    setGpsLoading(true)
+
+    let lat = 0, lng = 0
+    try {
+      ;({ lat, lng } = await getGpsPosition())
+    } finally {
+      gpsLoadingRef.current = false
+      setGpsLoading(false)
+    }
+
     if (checkedIn) {
       checkOutMutation.mutate({ lat, lng, km: 0 }, {
         onSuccess: () => { checkOut(); setElapsedSeconds(0) },
+        onError: () => toast.error('Check-out failed. Please try again.'),
       })
     } else {
       checkInMutation.mutate({ lat, lng }, {
@@ -186,21 +202,23 @@ export default function FieldStaffDashboardPage() {
           setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
         },
         onError: (err) => {
-          // Already checked in (state lost after page refresh) — re-sync from server
           const msg = err?.response?.data?.detail ?? ''
           if (msg.toLowerCase().includes('already')) {
+            // State lost after page refresh — re-sync timer from server
             const startedAt = todayAttendance?.check_in
               ? new Date(todayAttendance.check_in).getTime()
               : Date.now()
             checkIn(startedAt)
             setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+          } else {
+            toast.error(msg || 'Check-in failed. Please try again.')
           }
         },
       })
     }
   }
 
-  const dutyBusy = checkInMutation.isPending || checkOutMutation.isPending
+  const dutyBusy = gpsLoading || checkInMutation.isPending || checkOutMutation.isPending
 
   return (
     <DashboardShell

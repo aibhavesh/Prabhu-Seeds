@@ -60,11 +60,16 @@ def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def calculate_route_km(waypoints: list[tuple[float, float]]) -> float:
-    """Sum Haversine distances across a list of (lat, lng) waypoints."""
+def calculate_route_km(waypoints: list[tuple[float, float]], min_leg_m: float = 0) -> float:
+    """Sum Haversine distances across a list of (lat, lng) waypoints.
+
+    min_leg_m: skip any leg shorter than this many metres (filters GPS drift).
+    """
     total = 0.0
     for i in range(len(waypoints) - 1):
-        total += haversine_km(*waypoints[i], *waypoints[i + 1])
+        leg_km = haversine_km(*waypoints[i], *waypoints[i + 1])
+        if leg_km * 1000 >= min_leg_m:
+            total += leg_km
     return round(total, 1)
 
 
