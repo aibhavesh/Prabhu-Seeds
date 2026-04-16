@@ -133,7 +133,8 @@ function JourneyTracker({ user, onJourneyAdded }) {
     setSaving(true)
     try {
       const { startTime: st, endTime, totalKm: km } = completed
-      const amount  = parseFloat((km * RATE_PER_KM).toFixed(2))
+      // Use at least ₹1 so backend doesn't reject a zero-amount record
+      const amount  = Math.max(parseFloat((km * RATE_PER_KM).toFixed(2)), 1)
       const depTime = format(new Date(st), 'HH:mm')
       const arrTime = format(new Date(endTime), 'HH:mm')
 
@@ -143,7 +144,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
         type: 'travel',
         description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
         amount,
-        km: parseFloat(km.toFixed(2)),
+        km: parseFloat(Math.max(km, 0).toFixed(2)),
         rate: RATE_PER_KM,
       })
 
@@ -156,7 +157,8 @@ function JourneyTracker({ user, onJourneyAdded }) {
       toast.success('Journey saved! It will be included in the next sheet print.')
       setCompleted(null)
     } catch (err) {
-      toast.error(err?.response?.data?.detail ?? 'Failed to save journey.')
+      const detail = err?.response?.data?.detail ?? err?.message ?? 'Failed to save journey.'
+      toast.error(detail)
     } finally {
       setSaving(false)
     }

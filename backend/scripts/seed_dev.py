@@ -28,7 +28,10 @@ from sqlalchemy import select, func
 from app.core.config import settings
 from app.models.user import User
 from app.models.activity_type import ActivityType
+from app.models.expense import Expense
 from app.services.activity_type_service import SEED_ACTIVITY_TYPES
+from datetime import date, timedelta
+from decimal import Decimal
 
 # ── Desired users ──────────────────────────────────────────────────────────────
 # (role, name, mobile, state, hq)
@@ -123,6 +126,47 @@ async def seed():
                 db.add(ActivityType(**at_data))
             await db.commit()
             print(f"Seeded {len(SEED_ACTIVITY_TYPES)} activity types.")
+
+        # ── Travel Expenses for Field Agent ───────────────────────────────────
+        field_user_result = await db.execute(select(User).where(User.mobile == "9777777777"))
+        field_user = field_user_result.scalar_one_or_none()
+
+        if field_user:
+            existing_travel = (await db.execute(
+                select(Expense).where(Expense.user_id == field_user.id, Expense.type == "travel")
+            )).scalars().all()
+
+            if not existing_travel:
+                today = date.today()
+                TRAVEL_RECORDS = [
+                    # (days_ago, dep_time, arr_time, km, status, description)
+                    (1,  "08:15", "11:30", 42.5, "pending",  "Journey on {} | Dep: 08:15 → Arr: 11:30"),
+                    (3,  "07:45", "13:20", 78.0, "approved", "Journey on {} | Dep: 07:45 → Arr: 13:20"),
+                    (5,  "09:00", "12:00", 35.2, "approved", "Journey on {} | Dep: 09:00 → Arr: 12:00"),
+                    (8,  "08:30", "15:45", 92.0, "pending",  "Journey on {} | Dep: 08:30 → Arr: 15:45"),
+                    (10, "07:00", "10:30", 55.5, "rejected", "Journey on {} | Dep: 07:00 → Arr: 10:30"),
+                    (12, "09:15", "14:00", 63.0, "approved", "Journey on {} | Dep: 09:15 → Arr: 14:00"),
+                ]
+                rate = Decimal("3.25")
+                for days_ago, dep, arr, km, status, desc_tpl in TRAVEL_RECORDS:
+                    travel_date = today - timedelta(days=days_ago)
+                    km_dec = Decimal(str(km))
+                    db.add(Expense(
+                        user_id=field_user.id,
+                        date=travel_date,
+                        type="travel",
+                        description=desc_tpl.format(travel_date.strftime("%d %b %Y")),
+                        amount=round(km_dec * rate, 2),
+                        km=km_dec,
+                        rate=rate,
+                        status=status,
+                    ))
+                await db.commit()
+                print(f"Seeded {len(TRAVEL_RECORDS)} travel records for Field Agent (9777777777).")
+            else:
+                print(f"Travel records already exist for Field Agent — skipping ({len(existing_travel)} found).")
+        else:
+            print("Field Agent not found — skipping travel seed.")
 
     await engine.dispose()
     print("\nDone! Start the backend and visit http://localhost:5173")
