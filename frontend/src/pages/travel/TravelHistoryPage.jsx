@@ -9,7 +9,7 @@ import useTravelJourney from './hooks/useTravelJourney'
 import {
   getPendingJourneys,
   addPendingJourney,
-  printTravelSheet,
+  printTravelPDF,
   RATE_PER_KM,
 } from '@/utils/travelSheet'
 import TravelShell from './components/TravelShell'
@@ -24,7 +24,10 @@ function safeNumber(value, fallback = 0) {
 }
 
 function normalizeHistory(payload) {
-  const rows = payload?.claims ?? payload?.items ?? payload?.data ?? []
+  // API returns a plain array directly
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload?.claims ?? payload?.items ?? payload?.data ?? []
   if (!Array.isArray(rows)) return []
   return rows.map((row, idx) => {
     const status = String(row.status ?? 'pending').toLowerCase()
@@ -168,9 +171,9 @@ function JourneyTracker({ user, onJourneyAdded }) {
     if (pending.length === 0) return
     setPrinting(true)
     try {
-      await printTravelSheet(user?.name)
+      await printTravelPDF(user?.name)
       refreshPending()
-      toast.success('Sheet downloaded! Future journeys will go to a new sheet.')
+      toast.success('PDF downloaded! Future journeys will go to a new claim.')
     } catch (err) {
       toast.error(err?.message ?? 'Failed to generate sheet.')
     } finally {
@@ -215,7 +218,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
             className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-[16px]">print</span>
-            {printing ? 'Generating…' : 'Print Sheet'}
+            {printing ? 'Generating…' : 'Print PDF'}
           </button>
         </div>
       )}
