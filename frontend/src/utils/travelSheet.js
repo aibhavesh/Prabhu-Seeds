@@ -1,17 +1,16 @@
 /**
  * Travel claim PDF generator.
+ * Replicates the Excel template layout including the company logo.
  *
  * Pending journeys are stored in localStorage under PENDING_KEY.
- * Each journey = { startTime, endTime, totalKm }
- *
- * printTravelPDF() generates an A4 PDF matching the travel claim format,
- * downloads it, then clears the pending list.
+ * printTravelPDF() generates the PDF, downloads it, then clears the list.
  */
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { format, isValid } from 'date-fns'
 
-const PENDING_KEY = 'travel_pending_journeys'
+const PENDING_KEY    = 'travel_pending_journeys'
+const LOGO_URL       = '/templates/travel-logo.png'
 export const RATE_PER_KM = 3.25
 
 // ── Pending journey storage ────────────────────────────────────────────────────
@@ -49,44 +48,78 @@ export function clearPendingJourneys() {
   try { localStorage.removeItem(PENDING_KEY) } catch { /* ignore */ }
 }
 
+// ── Image → base64 ─────────────────────────────────────────────────────────────
+
+async function fetchImageBase64(url) {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const blob = await res.blob()
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result)
+      reader.onerror  = () => resolve(null)
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    return null
+  }
+}
+
 // ── PDF generation ─────────────────────────────────────────────────────────────
 
-/**
- * Generates an A4 travel claim PDF from all pending journeys and downloads it.
- * Clears the pending list after the PDF is built.
- *
- * @param {string} staffName
- */
 export async function printTravelPDF(staffName) {
   const journeys = getPendingJourneys()
   if (journeys.length === 0) throw new Error('No journeys queued for printing yet.')
 
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-  const pageW = doc.internal.pageSize.getWidth()
+  const logoBase64 = await fetchImageBase64(LOGO_URL)
 
-  // ── Header ──────────────────────────────────────────────────────────────────
-  doc.setFontSize(14)
+  const doc    = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+  const pageW  = doc.internal.pageSize.getWidth()   // 297
+  const margin = 10
+
+  // ── Logo (top-left, columns A–B in Excel, rows 2–4) ─────────────────────────
+  let headerEndY = margin
+  if (logoBase64) {
+    doc.addImage(logoBase64, 'PNG', margin, margin, 47, 21)
+    headerEndY = margin + 21
+  }
+
+  // ── Company name & title (centred) ──────────────────────────────────────────
+  doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
-  doc.text('PRABHUGOPAL AGRI PRODUCT PVT LTD', pageW / 2, 14, { align: 'center' })
+  doc.text('PRABHUGOPAL AGRI PRODUCT PVT LTD', pageW / 2, margin + 7, { align: 'center' })
 
-  doc.setFontSize(11)
-  doc.text('CLAIM FOR TRAVELLING EXPENSES', pageW / 2, 21, { align: 'center' })
+  doc.setFontSize(10)
+  doc.text('CLAIM FOR TRAVELLING EXPENSES', pageW / 2, margin + 14, { align: 'center' })
 
+  // ── Name / Date line ─────────────────────────────────────────────────────────
+  const infoY = Math.max(headerEndY, margin + 21) + 4
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
-  doc.text(`Name: ${staffName ?? ''}`, 14, 30)
-  doc.text(`Date: ${format(new Date(), 'dd/MM/yyyy')}`, pageW - 14, 30, { align: 'right' })
+  doc.text(`Name: ${staffName ?? ''}`, margin, infoY)
+  doc.text(`Designation:`, margin + 80, infoY)
+  doc.text(`Head Quarter:`, margin + 160, infoY)
+  doc.text(`Date: ${format(new Date(), 'dd/MM/yyyy')}`, pageW - margin, infoY, { align: 'right' })
 
-  // ── Table ────────────────────────────────────────────────────────────────────
+  // ── Main table ───────────────────────────────────────────────────────────────
+  const tableStartY = infoY + 5
+
   const head = [
     [
-      { content: 'DEPARTURE', colSpan: 3, styles: { halign: 'center' } },
-      { content: 'ARRIVAL',   colSpan: 3, styles: { halign: 'center' } },
-      { content: 'Place of Stay', styles: { halign: 'center' } },
-      { content: 'DETAILS OF TRAVEL', colSpan: 3, styles: { halign: 'center' } },
-      { content: 'Rs.', styles: { halign: 'center' } },
+      { content: 'DEPARTURE', colSpan: 3, styles: { halign: 'center', fillColor: [230, 230, 230] } },
+      { content: 'ARRIVAL',   colSpan: 3, styles: { halign: 'center', fillColor: [230, 230, 230] } },
+      { content: 'Place\nof Stay', rowSpan: 2, styles: { halign: 'center', fillColor: [230, 230, 230], valign: 'middle' } },
+      { content: 'DETAILS OF TRAVEL', colSpan: 3, styles: { halign: 'center', fillColor: [230, 230, 230] } },
+      { content: 'Rs.', rowSpan: 2, styles: { halign: 'center', fillColor: [230, 230, 230], valign: 'middle' } },
     ],
-    ['Date', 'Time', 'Place', 'Date', 'Time', 'Place', '', 'Opp.', 'Closing', 'Km', 'Rs.'],
+    [
+      'Date', 'Time', 'Place',
+      'Date', 'Time', 'Place',
+      // Place of Stay is rowSpan above
+      'Opp.', 'Closing', 'Km',
+      // Rs. is rowSpan above
+    ],
   ]
 
   let totalKm  = 0
@@ -101,80 +134,98 @@ export async function printTravelPDF(staffName) {
     totalAmt += amt
 
     return [
-      isValid(startDate) ? format(startDate, 'dd/MM/yyyy') : '',
+      isValid(startDate) ? format(startDate, 'dd/MM/yy') : '',
       isValid(startDate) ? format(startDate, 'HH:mm') : '',
-      '', // place — filled manually
-      isValid(endDate) ? format(endDate, 'dd/MM/yyyy') : '',
+      '', // Place — user fills manually
+      isValid(endDate) ? format(endDate, 'dd/MM/yy') : '',
       isValid(endDate) ? format(endDate, 'HH:mm') : '',
-      '', // place — filled manually
-      '', // place of stay — filled manually
+      '', // Place — user fills manually
+      '', // Place of stay — user fills manually
       '0',
       km.toFixed(1),
       km.toFixed(1),
-      `${amt.toFixed(2)}`,
+      `₹${amt.toFixed(2)}`,
     ]
   })
 
-  // Totals row
+  // Total Claim row
   body.push([
-    { content: 'TOTAL', colSpan: 9, styles: { fontStyle: 'bold', halign: 'right' } },
-    { content: totalKm.toFixed(1), styles: { fontStyle: 'bold', halign: 'center' } },
-    { content: `${totalAmt.toFixed(2)}`, styles: { fontStyle: 'bold', halign: 'right' } },
+    { content: 'Total Claim', colSpan: 8, styles: { fontStyle: 'bold', halign: 'right', fillColor: [245, 245, 245] } },
+    { content: totalKm.toFixed(1), styles: { fontStyle: 'bold', halign: 'center', fillColor: [245, 245, 245] } },
+    '', // Rs column (formula-based in Excel, shown as total here)
+    { content: `₹${totalAmt.toFixed(2)}`, styles: { fontStyle: 'bold', halign: 'right', fillColor: [245, 245, 245] } },
   ])
 
   autoTable(doc, {
-    startY: 35,
+    startY: tableStartY,
     head,
     body,
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold', halign: 'center' },
+    styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+    headStyles: { textColor: 0, fontStyle: 'bold', fontSize: 7.5 },
     columnStyles: {
-      0: { cellWidth: 22 }, // dep date
-      1: { cellWidth: 14 }, // dep time
-      2: { cellWidth: 28 }, // dep place (blank — user fills)
-      3: { cellWidth: 22 }, // arr date
-      4: { cellWidth: 14 }, // arr time
-      5: { cellWidth: 28 }, // arr place (blank — user fills)
-      6: { cellWidth: 28 }, // place of stay (blank)
-      7: { cellWidth: 14 }, // opp
-      8: { cellWidth: 18 }, // closing
-      9: { cellWidth: 16 }, // km
-      10:{ cellWidth: 22 }, // rs
+      0:  { cellWidth: 20 }, // dep date
+      1:  { cellWidth: 13 }, // dep time
+      2:  { cellWidth: 30 }, // dep place (blank)
+      3:  { cellWidth: 20 }, // arr date
+      4:  { cellWidth: 13 }, // arr time
+      5:  { cellWidth: 30 }, // arr place (blank)
+      6:  { cellWidth: 30 }, // place of stay (blank)
+      7:  { cellWidth: 13 }, // opp
+      8:  { cellWidth: 18 }, // closing
+      9:  { cellWidth: 14 }, // km
+      10: { cellWidth: 22 }, // rs
     },
   })
 
-  // ── Footer note ──────────────────────────────────────────────────────────────
-  const finalY = (doc.lastAutoTable?.finalY ?? 35) + 6
+  const afterTable = doc.lastAutoTable?.finalY ?? tableStartY + 10
+
+  // ── Certification line ───────────────────────────────────────────────────────
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'italic')
-  doc.setTextColor(100)
+  doc.setTextColor(60)
   doc.text(
-    'Note: "Place" columns (Departure, Arrival, Place of Stay) are to be filled manually before submission.',
-    14,
-    finalY,
+    'I Certify that the claim is as per the T.A. Rules and I have not stayed with a friend or relative.',
+    margin,
+    afterTable + 5,
   )
   doc.setTextColor(0)
 
-  // ── Signature lines ───────────────────────────────────────────────────────────
-  const sigY = finalY + 12
+  // ── Signature section ────────────────────────────────────────────────────────
+  const sigY = afterTable + 16
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-  doc.line(14, sigY, 70, sigY)
-  doc.line(pageW - 70, sigY, pageW - 14, sigY)
-  doc.text('Employee Signature', 14, sigY + 5)
-  doc.text('Authorized Signature', pageW - 14, sigY + 5, { align: 'right' })
+  doc.setFontSize(8)
+
+  // Touring person
+  doc.line(margin, sigY, margin + 55, sigY)
+  doc.text('TOURING PERSON', margin, sigY + 4)
+
+  // Head of department
+  doc.line(margin + 70, sigY, margin + 135, sigY)
+  doc.text('HEAD OF DEPARTMENT', margin + 70, sigY + 4)
+
+  // Accounts
+  doc.line(margin + 155, sigY, pageW - margin, sigY)
+  doc.text('ACCOUNTS DEPTT.', margin + 155, sigY + 4)
+
+  // ── Note about blank fields ──────────────────────────────────────────────────
+  doc.setFontSize(7)
+  doc.setFont('helvetica', 'italic')
+  doc.setTextColor(120)
+  doc.text(
+    'Note: "Place" columns (Departure, Arrival, Place of Stay) are to be filled manually before submission.',
+    margin,
+    sigY + 10,
+  )
+  doc.setTextColor(0)
 
   // ── Download ──────────────────────────────────────────────────────────────────
-  const firstDate = isValid(new Date(journeys[0].startTime))
-    ? format(new Date(journeys[0].startTime), 'yyyy-MM-dd')
-    : 'unknown'
-  const lastDate = isValid(new Date(journeys[journeys.length - 1].startTime))
-    ? format(new Date(journeys[journeys.length - 1].startTime), 'yyyy-MM-dd')
-    : 'unknown'
-  const name = (staffName ?? 'staff').replace(/\s+/g, '-')
-  const filename = `travel-claim_${name}_${firstDate}_to_${lastDate}.pdf`
+  const first = new Date(journeys[0].startTime)
+  const last  = new Date(journeys[journeys.length - 1].startTime)
+  const name  = (staffName ?? 'staff').replace(/\s+/g, '-')
+  const from  = isValid(first) ? format(first, 'yyyy-MM-dd') : 'unknown'
+  const to    = isValid(last)  ? format(last,  'yyyy-MM-dd') : 'unknown'
 
   clearPendingJourneys()
-  doc.save(filename)
+  doc.save(`travel-claim_${name}_${from}_to_${to}.pdf`)
 }
