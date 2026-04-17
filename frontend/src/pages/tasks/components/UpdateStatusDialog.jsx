@@ -101,6 +101,7 @@ function DeleteView({ task, onDone }) {
 
 function CompletionView({ task, onDone }) {
   const submitRecord = useSubmitRecord()
+  const [gpsNote, setGpsNote] = useState(null)
 
   const repeatCount = task.repeat_count ?? 1
   const recordCount = task.record_count ?? 0
@@ -109,10 +110,25 @@ function CompletionView({ task, onDone }) {
   const allDone = recordCount >= repeatCount
   const pct = Math.min(100, Math.round((recordCount / repeatCount) * 100))
 
+  async function captureGps() {
+    if (!navigator.geolocation) return { lat: null, lng: null }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve({ lat: null, lng: null }),
+        { timeout: 5000, maximumAge: 30000 },
+      )
+    })
+  }
+
   async function handleSubmit() {
+    setGpsNote('📍 Capturing location…')
+    const { lat, lng } = await captureGps()
+    setGpsNote(lat ? `📍 Location captured (${lat.toFixed(4)}, ${lng.toFixed(4)})` : null)
+
     try {
       await toast.promise(
-        submitRecord.mutateAsync({ taskId: task.id }),
+        submitRecord.mutateAsync({ taskId: task.id, lat, lng }),
         {
           loading: isRepetitive ? `Submitting completion #${nextNum}…` : 'Marking as completed…',
           success: allDone || nextNum >= repeatCount
@@ -202,6 +218,10 @@ function CompletionView({ task, onDone }) {
           <p className="text-sm font-semibold text-green-800">Mark this task as completed?</p>
           <p className="text-xs text-green-700 mt-1">This will close the task for this assignment.</p>
         </div>
+      )}
+
+      {gpsNote && (
+        <p className="text-xs text-on-surface-variant">{gpsNote}</p>
       )}
 
       <div className="flex gap-3">
