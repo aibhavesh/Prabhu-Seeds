@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { useAuthStore } from '@/store/authStore'
 import TaskStatusBadge from './TaskStatusBadge'
 import MiniMap from '@/components/maps/MiniMap'
+import { useTaskRecords } from '../hooks/useTasks'
 
 // ── Activity chain ─────────────────────────────────────────────────────────
 
@@ -52,6 +53,71 @@ function SectionLabel({ children }) {
 }
 
 // ── Sheet ──────────────────────────────────────────────────────────────────
+
+function CompletionLocations({ taskId, recordCount }) {
+  const { data: records, isLoading } = useTaskRecords(taskId, { enabled: recordCount > 0 })
+
+  if (recordCount === 0) return null
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: Math.min(recordCount, 3) }).map((_, i) => (
+          <div key={i} className="h-10 bg-gray-100 animate-pulse rounded" />
+        ))}
+      </div>
+    )
+  }
+
+  if (!records?.length) return null
+
+  return (
+    <div className="space-y-2">
+      {records.map((rec, i) => {
+        const hasLocation = rec.lat != null && rec.lng != null
+        const mapsUrl = hasLocation
+          ? `https://www.google.com/maps?q=${rec.lat},${rec.lng}`
+          : null
+
+        return (
+          <div
+            key={rec.id}
+            className="flex items-start gap-3 bg-gray-50 rounded-lg px-3 py-2.5"
+          >
+            {/* Number bubble */}
+            <span className="w-6 h-6 rounded-full bg-green-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+              {i + 1}
+            </span>
+
+            <div className="flex-1 min-w-0">
+              {/* Time */}
+              <p className="text-xs font-semibold text-gray-700">
+                {rec.submitted_at
+                  ? format(parseISO(rec.submitted_at), 'dd MMM yyyy, hh:mm a')
+                  : '—'}
+              </p>
+
+              {/* Location */}
+              {hasLocation ? (
+                <a
+                  href={mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline mt-0.5"
+                >
+                  <span className="material-symbols-outlined text-[13px]">location_on</span>
+                  {Number(rec.lat).toFixed(5)}, {Number(rec.lng).toFixed(5)}
+                </a>
+              ) : (
+                <p className="text-xs text-gray-400 mt-0.5">Location not available</p>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function TaskDetailSheet({ task, open, onOpenChange, onReassign, onUpdateStatus }) {
   const role = useAuthStore((s) => s.user?.role?.toLowerCase())
@@ -228,6 +294,14 @@ export default function TaskDetailSheet({ task, open, onOpenChange, onReassign, 
                 </div>
               </div>
             </section>
+
+            {/* Completion Locations — manager/owner only */}
+            {isManager && recordCount > 0 && (
+              <section>
+                <SectionLabel>Completion Locations</SectionLabel>
+                <CompletionLocations taskId={task.id} recordCount={recordCount} />
+              </section>
+            )}
 
             {/* Task Description */}
             {task.description && (

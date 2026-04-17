@@ -77,6 +77,17 @@ export function useDeleteTask() {
   })
 }
 
+/** Fetch all completion records for a task (for manager/owner location view). */
+export function useTaskRecords(taskId, options = {}) {
+  return useQuery({
+    queryKey: ['task-records', taskId],
+    queryFn: () => apiClient.get(`/api/v1/tasks/${taskId}/records`).then((r) => r.data),
+    enabled: !!taskId,
+    staleTime: 30_000,
+    ...options,
+  })
+}
+
 /** Submit a completion record for a task (field role). */
 export function useSubmitRecord() {
   const queryClient = useQueryClient()

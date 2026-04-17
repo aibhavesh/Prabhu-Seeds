@@ -12,6 +12,8 @@ class TaskRecordCreate(BaseModel):
     farmer_contact: str | None = None
     land_acres: Decimal | None = None
     photo_url: str | None = None
+    lat: float | None = None
+    lng: float | None = None
 
 
 class TaskRecordOut(BaseModel):
@@ -25,6 +27,8 @@ class TaskRecordOut(BaseModel):
     farmer_contact: str | None
     land_acres: Decimal | None
     photo_url: str | None
+    lat: float | None = None
+    lng: float | None = None
     submitted_at: datetime
 
     model_config = {"from_attributes": True}

@@ -189,6 +189,13 @@ async def submit_record(task_id: int, data: TaskRecordCreate, submitted_by: uuid
     return record
 
 
+async def get_task_records(task_id: int, db: AsyncSession) -> list[TaskRecord]:
+    result = await db.execute(
+        select(TaskRecord).where(TaskRecord.task_id == task_id).order_by(TaskRecord.submitted_at)
+    )
+    return list(result.scalars().all())
+
+
 async def delete_task(task_id: int, db: AsyncSession) -> bool:
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()

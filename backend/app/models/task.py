@@ -56,6 +56,8 @@ class TaskRecord(Base):
     farmer_contact: Mapped[str | None] = mapped_column(String, nullable=True)
     land_acres: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
     photo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    lat: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+    lng: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
     submitted_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
 
     task: Mapped[Task] = relationship("Task", back_populates="records")
