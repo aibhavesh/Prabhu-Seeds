@@ -102,6 +102,8 @@ async def live_positions(
             "outside_state":  False,
         }
         for e, state in zip(raw, states)
+        # Skip employees whose only recorded position is (0, 0) — GPS was unavailable
+        if not (e["lat"] == 0.0 and e["lng"] == 0.0)
     ]
 
     return {"employees": employees}

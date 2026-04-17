@@ -49,7 +49,10 @@ async def add_waypoint(
     _: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
-    return await attendance_service.add_waypoint(body, db)
+    try:
+        return await attendance_service.add_waypoint(body, db)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 @router.get("/", response_model=list[AttendanceListOut])

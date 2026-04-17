@@ -21,6 +21,13 @@ async def check_in(user_id: uuid.UUID, data: CheckInRequest, db: AsyncSession) -
     )
     existing = result.scalar_one_or_none()
 
+    def _has_valid_gps(lat, lng) -> bool:
+        """Return True only if coordinates are a real non-zero GPS fix."""
+        try:
+            return not (float(lat) == 0.0 and float(lng) == 0.0)
+        except (TypeError, ValueError):
+            return False
+
     if existing:
         if existing.check_out is None:
             raise ValueError("Already checked in today")
@@ -29,15 +36,16 @@ async def check_in(user_id: uuid.UUID, data: CheckInRequest, db: AsyncSession) -
         existing.check_out = None
         existing.km = Decimal("0")
         existing.status = "active"
-        waypoint = GpsWaypoint(
-            attendance_id=existing.id,
-            lat=data.lat,
-            lng=data.lng,
-            timestamp=existing.check_in,
-            type="checkin",
-            stop_label="Check In",
-        )
-        db.add(waypoint)
+        if _has_valid_gps(data.lat, data.lng):
+            waypoint = GpsWaypoint(
+                attendance_id=existing.id,
+                lat=data.lat,
+                lng=data.lng,
+                timestamp=existing.check_in,
+                type="checkin",
+                stop_label="Check In",
+            )
+            db.add(waypoint)
         await db.commit()
         await db.refresh(existing)
         return existing
@@ -46,15 +54,16 @@ async def check_in(user_id: uuid.UUID, data: CheckInRequest, db: AsyncSession) -
     db.add(attendance)
     await db.flush()
 
-    waypoint = GpsWaypoint(
-        attendance_id=attendance.id,
-        lat=data.lat,
-        lng=data.lng,
-        timestamp=attendance.check_in,
-        type="checkin",
-        stop_label="Check In",
-    )
-    db.add(waypoint)
+    if _has_valid_gps(data.lat, data.lng):
+        waypoint = GpsWaypoint(
+            attendance_id=attendance.id,
+            lat=data.lat,
+            lng=data.lng,
+            timestamp=attendance.check_in,
+            type="checkin",
+            stop_label="Check In",
+        )
+        db.add(waypoint)
     await db.commit()
     await db.refresh(attendance)
     return attendance
@@ -73,21 +82,24 @@ async def check_out(user_id: uuid.UUID, data: CheckOutRequest, db: AsyncSession)
 
     checkout_time = datetime.now(timezone.utc)
 
-    # Add checkout waypoint
-    checkout_wp = GpsWaypoint(
-        attendance_id=attendance.id,
-        lat=data.lat,
-        lng=data.lng,
-        timestamp=checkout_time,
-        type="checkout",
-        stop_label="Check Out",
-    )
-    db.add(checkout_wp)
-    await db.flush()  # get checkout_wp into memory before distance calc
+    # Add checkout waypoint only when GPS is valid — (0,0) would wildly distort the route
+    extra_wps: list[GpsWaypoint] = []
+    if not (float(data.lat) == 0.0 and float(data.lng) == 0.0):
+        checkout_wp = GpsWaypoint(
+            attendance_id=attendance.id,
+            lat=data.lat,
+            lng=data.lng,
+            timestamp=checkout_time,
+            type="checkout",
+            stop_label="Check Out",
+        )
+        db.add(checkout_wp)
+        await db.flush()  # persist before distance calc
+        extra_wps = [checkout_wp]
 
     # Auto-calculate km: sum Haversine distances across all waypoints
     all_wps = sorted(
-        [*attendance.waypoints, checkout_wp],
+        [*attendance.waypoints, *extra_wps],
         key=lambda w: w.timestamp,
     )
     if len(all_wps) >= 2:
@@ -108,6 +120,8 @@ async def check_out(user_id: uuid.UUID, data: CheckOutRequest, db: AsyncSession)
 
 
 async def add_waypoint(data: WaypointCreate, db: AsyncSession) -> GpsWaypoint:
+    if float(data.lat) == 0.0 and float(data.lng) == 0.0:
+        raise ValueError("Invalid GPS coordinates (0, 0) — waypoint not saved")
     wp = GpsWaypoint(**data.model_dump())
     db.add(wp)
     await db.commit()

@@ -45,7 +45,15 @@ export function useGpsWatcher({ attendanceId, enabled = false }) {
     if (!navigator.geolocation) return
 
     function handlePosition(pos) {
-      const { latitude: lat, longitude: lng } = pos.coords
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords
+
+      // Reject clearly invalid coordinates
+      if (lat === 0 && lng === 0) return
+
+      // Reject very low-accuracy fixes (> 3 km) — typical of IP-based fallback on laptops.
+      // Real GPS is usually < 50 m; WiFi < 200 m; cell < 2000 m.
+      if (accuracy > 3000) return
+
       const now = Date.now()
       const last = lastPostRef.current
 

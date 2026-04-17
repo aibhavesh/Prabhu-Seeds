@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@supabase/supabase-js'
 import apiClient from '@/lib/axios'
 import { withDerivedFields } from '@/pages/tracking/utils/liveTrackingFilters'
@@ -23,52 +23,6 @@ function normalizeRows(payload) {
   }))
 }
 
-function mergeWaypoint(previousRows, waypoint) {
-  const userId = waypoint?.user_id ?? waypoint?.employee_id ?? waypoint?.staff_id
-  if (!userId) return previousRows
-
-  const next = [...previousRows]
-  const index = next.findIndex((row) => String(row.user_id) === String(userId))
-
-  const patch = {
-    user_id: userId,
-    name: waypoint?.name,
-    department: waypoint?.department,
-    state: waypoint?.state,
-    assigned_state: waypoint?.assigned_state,
-    lat: Number(waypoint?.lat ?? waypoint?.latitude),
-    lng: Number(waypoint?.lng ?? waypoint?.longitude),
-    accuracy: Number(waypoint?.accuracy ?? waypoint?.gps_accuracy ?? 0),
-    last_seen: waypoint?.timestamp ?? waypoint?.created_at ?? new Date().toISOString(),
-    current_location: waypoint?.current_location ?? waypoint?.location_name ?? null,
-    outside_state: Boolean(waypoint?.outside_state ?? waypoint?.is_outside_state ?? false),
-  }
-
-  if (index === -1) {
-    next.push({
-      ...patch,
-      name: patch.name ?? 'Unknown',
-      department: patch.department ?? 'Marketing',
-      state: patch.state ?? '--',
-      assigned_state: patch.assigned_state ?? patch.state ?? '--',
-    })
-    return next
-  }
-
-  const existing = next[index]
-  next[index] = {
-    ...existing,
-    ...patch,
-    name: patch.name ?? existing.name,
-    department: patch.department ?? existing.department,
-    state: patch.state ?? existing.state,
-    assigned_state: patch.assigned_state ?? existing.assigned_state,
-    lat: Number.isFinite(patch.lat) ? patch.lat : existing.lat,
-    lng: Number.isFinite(patch.lng) ? patch.lng : existing.lng,
-  }
-
-  return next
-}
 
 export function useLiveTracking(options = {}) {
   const {
@@ -77,8 +31,8 @@ export function useLiveTracking(options = {}) {
     supabaseClient: injectedSupabaseClient,
   } = options
 
+  const queryClient = useQueryClient()
   const [channelStatus, setChannelStatus] = useState('IDLE')
-  const [waypointUpdates, setWaypointUpdates] = useState([])
   const [lastRealtimeEventAt, setLastRealtimeEventAt] = useState(null)
 
   const supabaseClient = useMemo(() => {
@@ -110,16 +64,11 @@ export function useLiveTracking(options = {}) {
   const query = useQuery({
     queryKey: ['tracking-live'],
     queryFn: () => apiClient.get('/api/v1/tracking/live').then((res) => res.data),
+    // Poll when realtime is not connected; pause polling when realtime is active
+    // (realtime invalidates the query directly on each new waypoint INSERT)
     refetchInterval: pollingFallback ? pollingIntervalMs : false,
     placeholderData: (prev) => prev,
   })
-
-  const rows = useMemo(() => {
-    const baseRows = normalizeRows(query.data)
-    if (!waypointUpdates.length) return baseRows
-
-    return waypointUpdates.reduce((currentRows, waypoint) => mergeWaypoint(currentRows, waypoint), baseRows)
-  }, [query.data, waypointUpdates])
 
   useEffect(() => {
     if (disableRealtime || !supabaseClient) return undefined
@@ -129,8 +78,11 @@ export function useLiveTracking(options = {}) {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'gps_waypoints' },
-        (payload) => {
-          setWaypointUpdates((prev) => [...prev, payload?.new ?? {}])
+        () => {
+          // Invalidate so the query re-fetches with fresh employee positions.
+          // This is simpler and correct vs. trying to merge a gps_waypoints row
+          // (which lacks user_id and can't be matched to an employee directly).
+          queryClient.invalidateQueries({ queryKey: ['tracking-live'] })
           setLastRealtimeEventAt(new Date().toISOString())
         }
       )
@@ -145,11 +97,23 @@ export function useLiveTracking(options = {}) {
         channel.unsubscribe?.()
       }
     }
-  }, [supabaseClient, disableRealtime])
+  }, [supabaseClient, disableRealtime, queryClient])
+
+  const rows = useMemo(() => normalizeRows(query.data), [query.data])
 
   const employees = useMemo(
-    () => rows.filter((row) => Number.isFinite(row.lat) && Number.isFinite(row.lng)).map(withDerivedFields),
-    [rows]
+    () =>
+      rows
+        .filter(
+          (row) =>
+            Number.isFinite(row.lat) &&
+            Number.isFinite(row.lng) &&
+            // Exclude employees whose only recorded position is the (0, 0) sentinel
+            // value that gets saved when GPS is unavailable at check-in time.
+            !(row.lat === 0 && row.lng === 0),
+        )
+        .map(withDerivedFields),
+    [rows],
   )
 
   return {
