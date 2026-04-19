@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
+import { useAuthStore } from '@/store/authStore'
 import apiClient from '@/lib/axios'
 
 function buildMockSettingsData() {
@@ -83,6 +84,16 @@ async function fetchPlatformSettings() {
 }
 
 export default function PlatformSettingsPage() {
+  const user = useAuthStore((s) => s.user)
+  const initials = useMemo(() => {
+    return String(user?.name ?? '')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join('')
+  }, [user?.name])
+
   const settingsQuery = useQuery({
     queryKey: ['platform-settings'],
     queryFn: fetchPlatformSettings,
@@ -92,15 +103,6 @@ export default function PlatformSettingsPage() {
   const settings = settingsQuery.data ?? buildMockSettingsData()
   const [language, setLanguage] = useState(settings.preferences.language)
   const [alerts, setAlerts] = useState(settings.preferences.alerts)
-
-  const tabs = useMemo(
-    () => [
-      { id: 'dashboard', label: 'Dashboard' },
-      { id: 'analytics', label: 'Analytics' },
-      { id: 'logistics', label: 'Logistics' },
-    ],
-    []
-  )
 
   function toggleAlert(alertKey) {
     setAlerts((current) => ({
@@ -115,29 +117,11 @@ export default function PlatformSettingsPage() {
       brandSubtitle="Agritask Platform"
       topbar={
         <DashboardTopbar
-          left={
-            <div className="flex items-center gap-4 text-xs">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={`h-8 px-2 border-b-2 ${tab.id === 'dashboard' ? 'border-primary text-primary font-semibold' : 'border-transparent text-on-surface-variant'}`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          }
+          left={null}
           right={
-            <>
-              <button type="button" className="h-7 w-7 inline-flex items-center justify-center text-on-surface-variant" aria-label="Notifications">
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">notifications</span>
-              </button>
-              <button type="button" className="h-7 w-7 inline-flex items-center justify-center text-primary border-b-2 border-primary" aria-label="Settings">
-                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">settings</span>
-              </button>
-              <span className="h-7 w-7 rounded-sm bg-primary-container text-on-primary text-[11px] font-bold inline-flex items-center justify-center">AD</span>
-            </>
+            <span className="h-7 w-7 rounded-sm bg-primary-container text-on-primary text-[11px] font-bold inline-flex items-center justify-center">
+              {initials || '?'}
+            </span>
           }
         />
       }
