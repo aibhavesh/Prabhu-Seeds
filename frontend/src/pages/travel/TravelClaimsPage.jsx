@@ -16,15 +16,17 @@ function toIsoDate(date) {
 }
 
 function normalizeClaims(payload) {
-  const rows = payload?.claims ?? payload?.items ?? payload?.data ?? []
+  const rows = Array.isArray(payload)
+    ? payload
+    : (payload?.claims ?? payload?.items ?? payload?.data ?? [])
   if (!Array.isArray(rows)) return []
 
   return rows.map((row, idx) => ({
     id: row.id ?? row.claim_id ?? `travel-${idx}`,
     staffName: row.staff_name ?? row.staff?.name ?? row.name ?? 'Unknown',
     date: row.date ?? row.travel_date ?? row.created_at,
-    distanceKm: Number(row.distance_km ?? row.distance ?? 0),
-    ppkRate: Number(row.ppk_rate ?? row.rate_per_km ?? 0),
+    distanceKm: Number(row.km ?? row.distance_km ?? row.distance ?? 0),
+    ppkRate: Number(row.rate ?? row.ppk_rate ?? row.rate_per_km ?? 0),
     amountInr: Number(row.amount_inr ?? row.amount ?? 0),
     status: String(row.status ?? 'pending').toLowerCase(),
     department: row.department ?? row.staff?.department ?? '--',
@@ -49,7 +51,7 @@ function formatMoney(value) {
 
 export default function TravelClaimsPage() {
   const user = useAuthStore((s) => s.user)
-  const isAccounts = user?.role === 'accounts'
+  const isAccounts = ['ACCOUNTS', 'OWNER', 'accounts', 'owner'].includes(user?.role)
 
   const [fromDate, setFromDate] = useState(toIsoDate(new Date(new Date().setDate(1))))
   const [toDate, setToDate] = useState(toIsoDate(new Date()))

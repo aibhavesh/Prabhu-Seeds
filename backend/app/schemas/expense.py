@@ -33,3 +33,18 @@ class ExpenseOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TravelClaimOut(BaseModel):
+    """Travel expense enriched with the staff member's name — used by owner/manager/accounts view."""
+    id: int
+    user_id: uuid.UUID
+    staff_name: str
+    date: _Date
+    description: str | None
+    amount: Decimal
+    km: Decimal | None
+    rate: Decimal | None
+    status: str
+    approved_by: uuid.UUID | None
+    created_at: datetime
