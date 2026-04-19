@@ -1,12 +1,22 @@
+from datetime import date as _date
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.models.attendance import Attendance
 from app.models.user import User
-from app.schemas.attendance import CheckInRequest, CheckOutRequest, WaypointCreate, AttendanceOut, AttendanceListOut, WaypointOut
+from app.schemas.attendance import CheckInRequest, CheckOutRequest, WaypointCreate, AttendanceOut, AttendanceListOut, WaypointOut, TeamAttendanceOut
 from app.services import attendance_service
+
+DEPT_LABEL = {
+    "FIELD":    "Field Ops",
+    "MANAGER":  "Management",
+    "ACCOUNTS": "Accounts",
+    "OWNER":    "HQ",
+}
 
 router = APIRouter()
 
@@ -53,6 +63,61 @@ async def add_waypoint(
         return await attendance_service.add_waypoint(body, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+
+@router.get("/team", response_model=list[TeamAttendanceOut])
+async def team_attendance(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    date: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list:
+    """
+    Return all field staff attendance records for a given date.
+    Owner sees everyone; manager sees only their direct subordinates.
+    """
+    if current_user.role not in ("OWNER", "MANAGER"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    try:
+        target_date = _date.fromisoformat(date) if date else _date.today()
+    except (ValueError, TypeError):
+        target_date = _date.today()
+
+    stmt = (
+        select(Attendance, User)
+        .join(User, Attendance.user_id == User.id)
+        .where(
+            Attendance.date == target_date,
+            User.role.in_(["FIELD", "MANAGER"]),
+            User.is_active.is_(True),
+        )
+        .order_by(Attendance.check_in.asc().nulls_last())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    if current_user.role == "MANAGER":
+        stmt = stmt.where(User.manager_id == current_user.id)
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return [
+        TeamAttendanceOut(
+            id=att.id,
+            user_id=att.user_id,
+            name=user.name,
+            department=DEPT_LABEL.get(user.role, user.role.title()),
+            date=att.date,
+            check_in=att.check_in,
+            check_out=att.check_out,
+            km=att.km,
+            status=att.status,
+        )
+        for att, user in rows
+    ]
 
 
 @router.get("/", response_model=list[AttendanceListOut])

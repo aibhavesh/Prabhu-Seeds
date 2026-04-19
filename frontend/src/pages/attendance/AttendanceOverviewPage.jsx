@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
-import { useAttendance, useAttendanceReport, useMyTodayAttendance, useMyMonthlyReport, useMyAttendanceHistory } from './hooks/useAttendance'
+import { useTeamAttendance, useAttendanceReport, useMyTodayAttendance, useMyMonthlyReport, useMyAttendanceHistory } from './hooks/useAttendance'
 import AttendanceHeatmap from './components/AttendanceHeatmap'
 import AttendanceShell from './components/AttendanceShell'
 import { useAuthStore } from '@/store/authStore'
@@ -40,20 +40,36 @@ function gpsAccuracyBadge(accuracyMeters) {
 }
 
 function normalizeCheckIns(payload) {
-  const rows = payload?.today_check_ins ?? payload?.check_ins ?? payload?.records ?? payload?.items ?? []
-  return rows.map((row, idx) => ({
-    id: row.id ?? row.attendance_id ?? `${row.staff_id ?? row.name ?? 'row'}-${idx}`,
-    staffId: row.staff_id ?? row.user_id ?? row.id ?? `staff-${idx}`,
-    attendanceId: row.attendance_id ?? row.id,
-    name: row.name ?? row.staff_name ?? row.staff?.name ?? 'Unknown',
-    department: row.department ?? row.team ?? '—',
-    checkIn: row.check_in ?? row.in_time ?? row.check_in_time,
-    checkOut: row.check_out ?? row.out_time ?? row.check_out_time,
-    hours: row.hours ?? row.hours_worked ?? row.total_hours,
-    gpsAccuracy: row.gps_accuracy_m ?? row.gps_accuracy ?? row.gps?.accuracy,
-    travelPay: row.travel_pay ?? row.travel_pay_inr ?? row.travel?.pay,
-    travelClaimStatus: row.travel_claim_status ?? 'pending',
-  }))
+  // Accept a direct array (new /team endpoint) or a legacy wrapped object
+  const rows = Array.isArray(payload)
+    ? payload
+    : (payload?.today_check_ins ?? payload?.check_ins ?? payload?.records ?? payload?.items ?? [])
+
+  return rows.map((row, idx) => {
+    const checkIn  = row.check_in  ?? row.in_time  ?? row.check_in_time  ?? null
+    const checkOut = row.check_out ?? row.out_time ?? row.check_out_time ?? null
+
+    // Compute hours worked from timestamps when backend doesn't return it directly
+    const computedHours = checkIn && checkOut
+      ? (new Date(checkOut) - new Date(checkIn)) / (1000 * 60 * 60)
+      : null
+
+    return {
+      id:                row.id ?? row.attendance_id ?? `${row.staff_id ?? row.name ?? 'row'}-${idx}`,
+      staffId:           row.staff_id ?? row.user_id ?? row.id ?? `staff-${idx}`,
+      attendanceId:      row.attendance_id ?? row.id,
+      name:              row.name ?? row.staff_name ?? row.staff?.name ?? 'Unknown',
+      department:        row.department ?? row.team ?? '—',
+      checkIn,
+      checkOut,
+      hours:             row.hours ?? row.hours_worked ?? row.total_hours ?? computedHours,
+      km:                Number(row.km ?? 0),
+      status:            row.status ?? (checkOut ? 'done' : 'active'),
+      gpsAccuracy:       row.gps_accuracy_m ?? row.gps_accuracy ?? row.gps?.accuracy,
+      travelPay:         row.travel_pay ?? row.travel_pay_inr ?? row.travel?.pay,
+      travelClaimStatus: row.travel_claim_status ?? 'pending',
+    }
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,24 +326,32 @@ function OverviewSkeleton() {
 function TeamAttendanceView() {
   const navigate = useNavigate()
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(6)
+  const [pageSize] = useState(25)
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [approvedRows, setApprovedRows] = useState({})
 
-  const { data: attendanceData, isLoading: attendanceLoading, isError: attendanceError } = useAttendance({ page, pageSize, date })
+  const skip = (page - 1) * pageSize
+  const { data: teamData, isLoading: attendanceLoading, isError: attendanceError } = useTeamAttendance({ date, skip, limit: pageSize })
   const { data: reportData, isLoading: reportLoading } = useAttendanceReport({ date, month: date.slice(0, 7) })
 
-  const checkIns = useMemo(() => normalizeCheckIns(attendanceData), [attendanceData])
-  const summary = attendanceData?.summary ?? reportData?.summary ?? {}
-  const presentToday = Number(summary.present_today ?? checkIns.length)
-  const absentToday = Number(summary.absent_today ?? 0)
-  const avgHours = Number(summary.avg_hours ?? 0)
-  const totalTravelKm = Number(summary.total_travel_km ?? 0)
+  const checkIns = useMemo(() => normalizeCheckIns(teamData), [teamData])
+
+  // Derive summary stats directly from real data
+  const presentToday = checkIns.length
+  const avgHours = useMemo(() => {
+    const withBoth = checkIns.filter((r) => r.checkIn && r.checkOut)
+    if (!withBoth.length) return 0
+    return withBoth.reduce((s, r) => s + r.hours, 0) / withBoth.length
+  }, [checkIns])
+  const totalTravelKm = useMemo(() => checkIns.reduce((s, r) => s + r.km, 0), [checkIns])
+
   const heatmapDays = reportData?.calendar_days ?? reportData?.calendar ?? reportData?.days ?? []
-  const pagination = attendanceData?.pagination ?? {
-    page, pageSize,
-    totalPages: Math.max(1, Math.ceil((attendanceData?.total ?? checkIns.length) / pageSize)),
-    total: attendanceData?.total ?? checkIns.length,
+  const pagination = {
+    page,
+    pageSize,
+    // Backend returns up to `limit` items; if we got a full page more might exist
+    totalPages: checkIns.length >= pageSize ? page + 1 : page,
+    total: skip + checkIns.length,
   }
 
   function handleApprove(row) {
@@ -370,13 +394,15 @@ function TeamAttendanceView() {
           <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <article className="bg-surface-container-lowest shadow-ghost px-5 py-4 relative">
               <span className="absolute left-0 top-0 h-full w-1 bg-primary" aria-hidden="true" />
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Present Today</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Checked In</p>
               <p className="text-4xl font-black font-headline leading-none mt-1">{presentToday}</p>
             </article>
             <article className="bg-surface-container-lowest shadow-ghost px-5 py-4 relative">
-              <span className="absolute left-0 top-0 h-full w-1 bg-error" aria-hidden="true" />
-              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Absent Today</p>
-              <p className="text-4xl font-black font-headline leading-none mt-1">{absentToday}</p>
+              <span className="absolute left-0 top-0 h-full w-1 bg-green-600" aria-hidden="true" />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Checked Out</p>
+              <p className="text-4xl font-black font-headline leading-none mt-1">
+                {checkIns.filter((r) => r.status === 'done').length}
+              </p>
             </article>
             <article className="bg-surface-container-lowest shadow-ghost px-5 py-4 relative">
               <span className="absolute left-0 top-0 h-full w-1 bg-secondary" aria-hidden="true" />
@@ -407,18 +433,17 @@ function TeamAttendanceView() {
                 <table className="w-full text-left">
                   <thead className="bg-surface-container-high border-b border-outline-variant/10">
                     <tr>
-                      {['Staff Name', 'Department', 'Check-In', 'Check-Out', 'Hours', 'GPS Accuracy', 'Travel Pay', ''].map((h) => (
+                      {['Staff Name', 'Department', 'Check-In', 'Check-Out', 'Duration', 'KM', 'Status'].map((h) => (
                         <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant/10">
                     {checkIns.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-8 text-sm text-on-surface-variant text-center">No check-ins found for selected date.</td></tr>
+                      <tr><td colSpan={7} className="px-4 py-8 text-sm text-on-surface-variant text-center">No check-ins found for selected date.</td></tr>
                     ) : (
                       checkIns.map((row) => {
-                        const badge = gpsAccuracyBadge(row.gpsAccuracy)
-                        const approved = approvedRows[row.id] || row.travelClaimStatus === 'approved'
+                        const done = row.status === 'done' || !!row.checkOut
                         return (
                           <tr key={row.id} className="hover:bg-surface-container-low/50 transition-colors">
                             <td className="px-4 py-3">
@@ -430,15 +455,11 @@ function TeamAttendanceView() {
                             <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{formatClock(row.checkIn)}</td>
                             <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{formatClock(row.checkOut)}</td>
                             <td className="px-4 py-3 text-sm text-on-surface-variant">{formatHours(row.hours)}</td>
+                            <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{row.km.toFixed(1)}</td>
                             <td className="px-4 py-3">
-                              <span className={`inline-flex px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${badge.className}`}>{badge.label}</span>
-                            </td>
-                            <td className="px-4 py-3 text-sm text-on-surface-variant">{formatCurrency(row.travelPay)}</td>
-                            <td className="px-4 py-3 text-right">
-                              <button type="button" disabled={approved} onClick={() => handleApprove(row)}
-                                className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest ${approved ? 'bg-surface-container text-on-surface-variant cursor-not-allowed' : 'bg-primary text-on-primary hover:opacity-90'}`}>
-                                {approved ? 'Approved' : 'Approve Travel Claim'}
-                              </button>
+                              <span className={`inline-flex px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${done ? 'bg-green-100 text-green-700' : 'bg-primary/15 text-primary'}`}>
+                                {done ? 'Done' : 'Active'}
+                              </span>
                             </td>
                           </tr>
                         )

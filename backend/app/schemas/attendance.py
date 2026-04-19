@@ -59,3 +59,16 @@ class AttendanceListOut(BaseModel):
     status: str
 
     model_config = {"from_attributes": True}
+
+
+class TeamAttendanceOut(BaseModel):
+    """One row in the manager/owner team attendance view."""
+    id: int
+    user_id: uuid.UUID
+    name: str
+    department: str
+    date: _Date
+    check_in: datetime | None
+    check_out: datetime | None
+    km: Decimal
+    status: str

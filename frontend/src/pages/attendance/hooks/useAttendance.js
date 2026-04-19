@@ -64,6 +64,22 @@ export function useMyAttendanceHistory(month) {
   })
 }
 
+/**
+ * Team attendance for a given date — manager/owner only.
+ * Returns all field staff check-ins for the selected day.
+ */
+export function useTeamAttendance({ date, skip = 0, limit = 100 } = {}) {
+  const params = Object.fromEntries(
+    Object.entries({ date, skip: skip || undefined, limit }).filter(([, v]) => v != null && v !== '')
+  )
+  return useQuery({
+    queryKey: ['team-attendance', params],
+    queryFn: () => apiClient.get('/api/v1/attendance/team', { params }).then((r) => r.data),
+    refetchInterval: 30_000,
+    placeholderData: (prev) => prev,
+  })
+}
+
 /** Check in for today — requires lat/lng from browser geolocation. */
 export function useCheckIn() {
   const queryClient = useQueryClient()
