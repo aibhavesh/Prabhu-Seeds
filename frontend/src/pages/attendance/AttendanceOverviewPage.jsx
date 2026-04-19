@@ -433,37 +433,29 @@ function TeamAttendanceView() {
                 <table className="w-full text-left">
                   <thead className="bg-surface-container-high border-b border-outline-variant/10">
                     <tr>
-                      {['Staff Name', 'Department', 'Check-In', 'Check-Out', 'Duration', 'KM', 'Status'].map((h) => (
+                      {['Staff Name', 'Department', 'Check-In', 'Check-Out', 'Duration', 'KM'].map((h) => (
                         <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant/10">
                     {checkIns.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-sm text-on-surface-variant text-center">No check-ins found for selected date.</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-sm text-on-surface-variant text-center">No check-ins found for selected date.</td></tr>
                     ) : (
-                      checkIns.map((row) => {
-                        const done = row.status === 'done' || !!row.checkOut
-                        return (
-                          <tr key={row.id} className="hover:bg-surface-container-low/50 transition-colors">
-                            <td className="px-4 py-3">
-                              <button type="button" onClick={() => navigate(`/attendance/${row.staffId}/track?date=${date}`)} className="text-left">
-                                <span className="text-sm font-semibold text-on-surface hover:text-primary">{row.name}</span>
-                              </button>
-                            </td>
-                            <td className="px-4 py-3 text-sm text-on-surface-variant">{row.department}</td>
-                            <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{formatClock(row.checkIn)}</td>
-                            <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{formatClock(row.checkOut)}</td>
-                            <td className="px-4 py-3 text-sm text-on-surface-variant">{formatHours(row.hours)}</td>
-                            <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{row.km.toFixed(1)}</td>
-                            <td className="px-4 py-3">
-                              <span className={`inline-flex px-2 py-0.5 text-[10px] font-black uppercase tracking-widest ${done ? 'bg-green-100 text-green-700' : 'bg-primary/15 text-primary'}`}>
-                                {done ? 'Done' : 'Active'}
-                              </span>
-                            </td>
-                          </tr>
-                        )
-                      })
+                      checkIns.map((row) => (
+                        <tr key={row.id} className="hover:bg-surface-container-low/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <button type="button" onClick={() => navigate(`/attendance/${row.staffId}/track?date=${date}`)} className="text-left">
+                              <span className="text-sm font-semibold text-on-surface hover:text-primary">{row.name}</span>
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-on-surface-variant">{row.department}</td>
+                          <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{formatClock(row.checkIn)}</td>
+                          <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{formatClock(row.checkOut)}</td>
+                          <td className="px-4 py-3 text-sm text-on-surface-variant">{formatHours(row.hours)}</td>
+                          <td className="px-4 py-3 text-sm font-mono text-on-surface-variant">{row.km.toFixed(1)}</td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
