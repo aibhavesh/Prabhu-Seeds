@@ -3,7 +3,6 @@ import { format } from 'date-fns'
 import { Map, AdvancedMarker } from '@vis.gl/react-google-maps'
 import GoogleMapProvider from '@/components/maps/GoogleMapProvider'
 import GooglePolyline from '@/components/maps/GooglePolyline'
-import MapLoadingSkeleton from '@/components/maps/MapLoadingSkeleton'
 import { useTravelRoute } from '../hooks/useTravel'
 
 function boundingCenter(points) {
@@ -50,21 +49,20 @@ export default function TravelRouteMap({ expenseId, heightClass = 'h-[420px]' })
   const distanceKm = useMemo(() => (path.length > 1 ? totalKm(path) : 0), [path])
 
   if (isLoading) {
-    return <MapLoadingSkeleton heightClass={heightClass} label="Loading route..." />
-  }
-
-  if (isError) {
     return (
-      <div className={`w-full ${heightClass} bg-surface-container-low text-error flex items-center justify-center text-sm font-semibold`}>
-        Failed to load route data.
+      <div className={`w-full ${heightClass} bg-surface-container-low flex items-center justify-center gap-2 text-sm text-on-surface-variant`}>
+        <span className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        Checking for route data…
       </div>
     )
   }
 
-  if (!path.length) {
+  if (isError || !path.length) {
     return (
-      <div className={`w-full ${heightClass} bg-surface-container-low text-on-surface-variant flex items-center justify-center text-sm`}>
-        No GPS waypoints recorded for this journey.
+      <div className={`w-full ${heightClass} bg-surface-container-low flex flex-col items-center justify-center gap-2`}>
+        <span className="material-symbols-outlined text-3xl text-on-surface-variant/40" aria-hidden="true">location_off</span>
+        <p className="text-sm font-semibold text-on-surface-variant">No route data available for this journey.</p>
+        <p className="text-xs text-on-surface-variant/60">GPS waypoints were not recorded on this day.</p>
       </div>
     )
   }
