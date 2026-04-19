@@ -216,7 +216,7 @@ export default function PlatformSettingsPage() {
                       onClick={() => setLanguage('hindi')}
                       className={`h-8 px-4 text-sm font-semibold ${language === 'hindi' ? 'bg-surface-container-lowest text-primary' : 'text-on-surface-variant'}`}
                     >
-                      Hindi (\u0939\u093f\u0928\u094d\u0926\u0940)
+                      Hindi
                     </button>
                   </div>
                 </div>
