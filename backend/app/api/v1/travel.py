@@ -12,7 +12,9 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from app.models.user import User
 from app.models.expense import Expense
+from app.models.attendance import Attendance
 from app.schemas.expense import ExpenseOut, TravelClaimOut
+from app.schemas.attendance import WaypointOut
 from app.services import expense_service
 from app.services.visibility import get_subordinate_ids
 
@@ -96,3 +98,62 @@ async def reject_travel(
     if not expense:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel claim not found")
     return expense
+
+
+@router.get("/{expense_id}/route", response_model=list[WaypointOut])
+async def get_travel_route(
+    expense_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list:
+    """
+    Return GPS waypoints for a travel claim's journey day.
+    Finds the attendance record for the claim owner on the claim date,
+    then returns all waypoints ordered by timestamp.
+
+    Access:
+    - OWNER / ACCOUNTS: any claim
+    - MANAGER: own claims + subordinate claims
+    - FIELD: own claims only
+    """
+    # Load the expense with its user
+    result = await db.execute(
+        select(Expense)
+        .options(selectinload(Expense.user))
+        .where(Expense.id == expense_id, Expense.type == "travel")
+    )
+    expense = result.scalar_one_or_none()
+    if not expense:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Travel claim not found")
+
+    # Role-based access check
+    if current_user.role in ("OWNER", "ACCOUNTS"):
+        pass  # can see anything
+    elif current_user.role == "MANAGER":
+        sub_ids = await get_subordinate_ids(current_user.id, db)
+        visible = {current_user.id, *sub_ids}
+        if expense.user_id not in visible:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    else:
+        if expense.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Find the attendance record for this user on the claim date
+    att_result = await db.execute(
+        select(Attendance)
+        .options(selectinload(Attendance.waypoints))
+        .where(
+            Attendance.user_id == expense.user_id,
+            Attendance.date == expense.date,
+        )
+    )
+    attendance = att_result.scalar_one_or_none()
+    if not attendance or not attendance.waypoints:
+        return []
+
+    # Return waypoints ordered by timestamp, filtering out (0,0) sentinels
+    waypoints = sorted(
+        [w for w in attendance.waypoints if not (float(w.lat) == 0 and float(w.lng) == 0)],
+        key=lambda w: w.timestamp,
+    )
+    return waypoints

@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import { format } from 'date-fns'
 import generatePDF from 'react-to-pdf'
-import TaskRouteMap from '@/components/maps/TaskRouteMap'
+import TravelRouteMap from './components/TravelRouteMap'
 import toast from 'react-hot-toast'
 import { useTravelClaims, useApproveTravelClaim, useRejectTravelClaim } from './hooks/useTravel'
 import { useAuthStore } from '@/store/authStore'
@@ -30,14 +30,6 @@ function normalizeClaims(payload) {
     amountInr: Number(row.amount_inr ?? row.amount ?? 0),
     status: String(row.status ?? 'pending').toLowerCase(),
     department: row.department ?? row.staff?.department ?? '--',
-    origin: {
-      lat: Number(row.origin?.lat ?? row.origin_lat ?? row.route?.origin?.lat),
-      lng: Number(row.origin?.lng ?? row.origin_lng ?? row.route?.origin?.lng),
-    },
-    destination: {
-      lat: Number(row.destination?.lat ?? row.destination_lat ?? row.route?.destination?.lat),
-      lng: Number(row.destination?.lng ?? row.destination_lng ?? row.route?.destination?.lng),
-    },
   }))
 }
 
@@ -56,7 +48,7 @@ export default function TravelClaimsPage() {
   const [fromDate, setFromDate] = useState(toIsoDate(new Date(new Date().setDate(1))))
   const [toDate, setToDate] = useState(toIsoDate(new Date()))
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(8)
+  const [pageSize] = useState(10)
   const [statusFilter, setStatusFilter] = useState('all')
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [mapClaim, setMapClaim] = useState(null)
@@ -381,10 +373,17 @@ export default function TravelClaimsPage() {
                 aria-describedby={undefined}
               >
                 <div className="flex items-center justify-between mb-3">
-                  <Dialog.Title className="text-lg font-black font-headline text-on-surface">GPS Route</Dialog.Title>
+                  <div>
+                    <Dialog.Title className="text-lg font-black font-headline text-on-surface">GPS Journey Route</Dialog.Title>
+                    {mapClaim && (
+                      <p className="text-xs text-on-surface-variant mt-0.5">
+                        {mapClaim.staffName} · {mapClaim.date ? format(new Date(mapClaim.date), 'dd MMM yyyy') : ''}
+                      </p>
+                    )}
+                  </div>
                   <Dialog.Close className="text-on-surface-variant hover:text-on-surface text-2xl leading-none" aria-label="Close">&times;</Dialog.Close>
                 </div>
-                {mapClaim && <TaskRouteMap origin={mapClaim.origin} destination={mapClaim.destination} heightClass="h-[460px]" />}
+                {mapClaim && <TravelRouteMap expenseId={mapClaim.id} heightClass="h-[460px]" />}
               </Dialog.Content>
             </Dialog.Portal>
           </Dialog.Root>

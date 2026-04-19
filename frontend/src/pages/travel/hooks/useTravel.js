@@ -18,6 +18,16 @@ export function useTravelClaims(filters = {}) {
   })
 }
 
+export function useTravelRoute(expenseId) {
+  return useQuery({
+    queryKey: ['travel-route', expenseId],
+    queryFn: () => apiClient.get(`/api/v1/travel/${expenseId}/route`).then((res) => res.data),
+    enabled: !!expenseId,
+    staleTime: 10 * 60 * 1000, // routes don't change — cache for 10 min
+    gcTime: 15 * 60 * 1000,    // keep only one page-worth in memory
+  })
+}
+
 export function useTravelHistory(filters = {}) {
   const params = cleanParams(filters)
 
