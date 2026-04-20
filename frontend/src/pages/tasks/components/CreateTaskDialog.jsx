@@ -34,6 +34,65 @@ const schema = z.object({
   deadline: z.string().optional(),
 })
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function initials(name) {
+  return (name ?? '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+}
+
+function MemberPicker({ staff, selected, onToggle }) {
+  return (
+    <div className="space-y-2">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-1">
+          {selected.map((id) => {
+            const s = staff.find((x) => x.id === id)
+            if (!s) return null
+            return (
+              <span key={id} className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs font-semibold px-2 py-0.5 rounded-full">
+                <span className="w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center">
+                  {initials(s.name)}
+                </span>
+                {s.name}
+                <button type="button" onClick={() => onToggle(id)} className="ml-0.5 text-primary/60 hover:text-primary leading-none" aria-label={`Remove ${s.name}`}>&times;</button>
+              </span>
+            )
+          })}
+        </div>
+      )}
+      <div className="max-h-44 overflow-y-auto divide-y divide-outline-variant/10 border border-outline-variant/20 bg-surface-container-lowest">
+        {staff.length === 0 && (
+          <p className="px-3 py-4 text-xs text-on-surface-variant text-center">No field agents found.</p>
+        )}
+        {staff.map((s) => {
+          const checked = selected.includes(s.id)
+          return (
+            <button key={s.id} type="button" onClick={() => onToggle(s.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${checked ? 'bg-primary/8' : 'hover:bg-surface-container-low'}`}
+            >
+              <span className={`flex-shrink-0 w-4 h-4 border rounded flex items-center justify-center ${checked ? 'bg-primary border-primary' : 'border-outline-variant/50 bg-white'}`}>
+                {checked && (
+                  <svg className="w-2.5 h-2.5 text-on-primary" viewBox="0 0 10 8" fill="none">
+                    <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+              <span className="w-7 h-7 rounded-full bg-primary-container text-on-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                {initials(s.name)}
+              </span>
+              <span className={`text-sm ${checked ? 'font-semibold text-on-surface' : 'text-on-surface-variant'}`}>{s.name}</span>
+              {checked && <span className="ml-auto text-[10px] font-bold text-primary uppercase tracking-wide">Added</span>}
+            </button>
+          )
+        })}
+      </div>
+      {selected.length > 0 && (
+        <p className="text-xs text-primary font-semibold">{selected.length} agent{selected.length !== 1 ? 's' : ''} selected</p>
+      )}
+    </div>
+  )
+}
+
 // ── Small helpers ──────────────────────────────────────────────────────────
 
 function FieldError({ message }) {
@@ -89,6 +148,9 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
   const { data: fieldStaff = [] } = useFieldStaff({ enabled: open })
   const createTask = useCreateTask()
 
+  const [assignmentType, setAssignmentType] = useState('singular')
+  const [selectedMembers, setSelectedMembers] = useState([])
+
   const {
     register,
     handleSubmit,
@@ -109,21 +171,26 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
   const selectedActivity = getActivity(dept, season, activityName)
   const requiresLocation = selectedActivity?.requiresLocation ?? false
 
-  // When dept or season changes, clear activity (and its derived unit)
+  // When dept or season changes, clear activity
   useEffect(() => {
     setValue('activity_type', '')
   }, [dept, season, setValue])
 
   // Reset everything when dialog closes
   useEffect(() => {
-    if (!open) reset({ target: 1 })
+    if (!open) {
+      reset({ target: 1 })
+      setAssignmentType('singular')
+      setSelectedMembers([])
+    }
   }, [open, reset])
 
-  async function onSubmit(values) {
-    // auto-derive the unit from the selected activity
-    const unit = selectedActivity?.unit ?? 'NOS'
+  function toggleMember(id) {
+    setSelectedMembers((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
 
-    // title is auto-generated from activity + dept + season
+  async function onSubmit(values) {
+    const unit = selectedActivity?.unit ?? 'NOS'
     const title = `${values.activity_type} — ${values.dept} (${values.season})`
 
     const payload = {
@@ -132,7 +199,14 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
       ),
       title,
       unit,
-      assignment_type: 'singular',
+      assignment_type: assignmentType,
+    }
+
+    if (assignmentType === 'group') {
+      delete payload.assigned_to
+      payload.members = selectedMembers
+    } else {
+      delete payload.members
     }
 
     try {
@@ -258,15 +332,48 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
                     </select>
                   </Field>
 
-                  {/* ASM / Assign To */}
-                  <Field label="ASM Name" htmlFor="assigned_to" error={errors.assigned_to?.message}>
-                    <select id="assigned_to" {...register('assigned_to')} className={inputCls}>
-                      <option value="">Unassigned</option>
-                      {fieldStaff.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
+                  {/* Assignment — spans full width */}
+                  <div className="sm:col-span-2 bg-surface-container-low p-4 space-y-3">
+                    <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">
+                      Assignment Type
+                    </p>
+                    <div className="inline-flex bg-surface-container p-0.5 gap-0.5">
+                      {['singular', 'group'].map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => { setAssignmentType(type); setSelectedMembers([]) }}
+                          className={`px-5 py-2 text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-1.5 ${
+                            assignmentType === type ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-low'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[14px]">{type === 'singular' ? 'person' : 'group'}</span>
+                          {type === 'singular' ? 'Singular' : 'Group'}
+                        </button>
                       ))}
-                    </select>
-                  </Field>
+                    </div>
+
+                    {assignmentType === 'singular' ? (
+                      <Field label="ASM Name" htmlFor="assigned_to" error={errors.assigned_to?.message}>
+                        <select id="assigned_to" {...register('assigned_to')} className={inputCls}>
+                          <option value="">Unassigned</option>
+                          {fieldStaff.map((s) => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </Field>
+                    ) : (
+                      <div>
+                        <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
+                          Select Field Agents
+                        </p>
+                        <MemberPicker staff={fieldStaff} selected={selectedMembers} onToggle={toggleMember} />
+                        {selectedMembers.length === 0 && (
+                          <p className="text-xs text-on-surface-variant mt-1">Select at least one field agent.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   {/* ST / Territory */}
                   <Field label="ST / Territory" htmlFor="territory" error={errors.territory?.message}>
@@ -368,7 +475,7 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
               </Dialog.Close>
               <button
                 type="submit"
-                disabled={isSubmitting || !dept || !season || !activityName}
+                disabled={isSubmitting || !dept || !season || !activityName || (assignmentType === 'group' && selectedMembers.length === 0)}
                 className="px-5 py-2 bg-primary text-on-primary text-sm font-bold uppercase tracking-wider disabled:opacity-50"
               >
                 {isSubmitting ? 'Assigning…' : 'Assign Task'}
