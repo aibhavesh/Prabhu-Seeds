@@ -5,29 +5,43 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import toast from 'react-hot-toast'
-import { useActivityTypes, useFieldStaff, useCreateTask } from '../hooks/useTasks'
+import { useFieldStaff, useCreateTask } from '../hooks/useTasks'
+import {
+  DEPARTMENTS,
+  SEASONS,
+  INDIAN_STATES,
+  getActivities,
+  getActivity,
+} from '../constants/activityCatalog'
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
 const schema = z.object({
-  title: z.string().min(1, 'Title is required'),
-  activity_type: z.string().min(1, 'Activity type is required'),
-  assignment_type: z.enum(['singular', 'group']).default('singular'),
+  dept: z.string().min(1, 'Department is required'),
+  season: z.string().min(1, 'Season is required'),
+  activity_type: z.string().min(1, 'Activity is required'),
+
+  // Common fields
+  state: z.string().optional(),
   assigned_to: z.string().optional(),
-  dept: z.string().optional(),
-  deadline: z.string().optional(),
+  territory: z.string().optional(),
+  crop: z.string().optional(),
+  product: z.string().optional(),
+  target: z.coerce.number().int().min(1).default(1),
   description: z.string().optional(),
-  repeat_count: z.coerce.number().int().min(1).max(365).default(1),
+  month: z.string().optional(),
+  location: z.string().optional(),
+  deadline: z.string().optional(),
 })
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Small helpers ──────────────────────────────────────────────────────────
 
 function FieldError({ message }) {
   if (!message) return null
   return <p className="mt-1 text-xs text-error">{message}</p>
 }
 
-function Field({ label, htmlFor, error, children }) {
+function Field({ label, htmlFor, error, required, children }) {
   return (
     <div>
       <Label.Root
@@ -35,6 +49,7 @@ function Field({ label, htmlFor, error, children }) {
         className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1"
       >
         {label}
+        {required && <span className="text-error ml-0.5">*</span>}
       </Label.Root>
       {children}
       <FieldError message={error} />
@@ -43,106 +58,27 @@ function Field({ label, htmlFor, error, children }) {
 }
 
 const inputCls =
-  'w-full bg-surface-container-low border-none px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary'
+  'w-full bg-surface-container-low border-none px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50'
 
-function initials(name) {
-  return (name ?? '?')
-    .split(' ')
-    .map((w) => w[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
-}
+// ── Department / Season selector tabs ────────────────────────────────────
 
-// ── Group member picker ────────────────────────────────────────────────────
-
-function MemberPicker({ staff, selected, onToggle }) {
+function SegmentedControl({ options, value, onChange, className = '' }) {
   return (
-    <div className="space-y-2">
-      {/* Selected chips */}
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pb-1">
-          {selected.map((id) => {
-            const s = staff.find((x) => x.id === id)
-            if (!s) return null
-            return (
-              <span
-                key={id}
-                className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs font-semibold px-2 py-0.5 rounded-full"
-              >
-                <span className="w-4 h-4 rounded-full bg-primary text-on-primary text-[9px] font-bold flex items-center justify-center">
-                  {initials(s.name)}
-                </span>
-                {s.name}
-                <button
-                  type="button"
-                  onClick={() => onToggle(id)}
-                  className="ml-0.5 text-primary/60 hover:text-primary leading-none"
-                  aria-label={`Remove ${s.name}`}
-                >
-                  &times;
-                </button>
-              </span>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Agent list */}
-      <div className="max-h-44 overflow-y-auto divide-y divide-outline-variant/10 border border-outline-variant/20 bg-surface-container-lowest">
-        {staff.length === 0 && (
-          <p className="px-3 py-4 text-xs text-on-surface-variant text-center">
-            No field agents found.
-          </p>
-        )}
-        {staff.map((s) => {
-          const checked = selected.includes(s.id)
-          return (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => onToggle(s.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
-                checked ? 'bg-primary/8' : 'hover:bg-surface-container-low'
-              }`}
-            >
-              {/* Checkbox indicator */}
-              <span
-                className={`flex-shrink-0 w-4 h-4 border rounded flex items-center justify-center ${
-                  checked
-                    ? 'bg-primary border-primary'
-                    : 'border-outline-variant/50 bg-white'
-                }`}
-              >
-                {checked && (
-                  <svg className="w-2.5 h-2.5 text-on-primary" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </span>
-              {/* Avatar */}
-              <span className="w-7 h-7 rounded-full bg-primary-container text-on-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-                {initials(s.name)}
-              </span>
-              {/* Name */}
-              <span className={`text-sm ${checked ? 'font-semibold text-on-surface' : 'text-on-surface-variant'}`}>
-                {s.name}
-              </span>
-              {checked && (
-                <span className="ml-auto text-[10px] font-bold text-primary uppercase tracking-wide">
-                  Added
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {selected.length > 0 && (
-        <p className="text-xs text-primary font-semibold">
-          {selected.length} agent{selected.length !== 1 ? 's' : ''} selected
-        </p>
-      )}
+    <div className={`inline-flex bg-surface-container-low p-0.5 gap-0.5 ${className}`}>
+      {options.map((opt) => (
+        <button
+          key={opt}
+          type="button"
+          onClick={() => onChange(opt)}
+          className={`px-4 py-1.5 text-xs font-bold uppercase tracking-widest transition-colors ${
+            value === opt
+              ? 'bg-primary text-on-primary'
+              : 'text-on-surface-variant hover:bg-surface-container'
+          }`}
+        >
+          {opt}
+        </button>
+      ))}
     </div>
   )
 }
@@ -150,11 +86,8 @@ function MemberPicker({ staff, selected, onToggle }) {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function CreateTaskDialog({ open, onOpenChange }) {
-  const { data: activityTypes = [] } = useActivityTypes({ enabled: open })
   const { data: fieldStaff = [] } = useFieldStaff({ enabled: open })
   const createTask = useCreateTask()
-
-  const [selectedMembers, setSelectedMembers] = useState([])
 
   const {
     register,
@@ -165,36 +98,41 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { repeat_count: 1, assignment_type: 'singular' },
+    defaultValues: { target: 1 },
   })
 
-  const repeatCount = watch('repeat_count') || 1
-  const assignmentType = watch('assignment_type')
+  const dept = watch('dept') ?? ''
+  const season = watch('season') ?? ''
+  const activityName = watch('activity_type') ?? ''
+
+  const activities = getActivities(dept, season)
+  const selectedActivity = getActivity(dept, season, activityName)
+  const requiresLocation = selectedActivity?.requiresLocation ?? false
+
+  // When dept or season changes, clear activity (and its derived unit)
+  useEffect(() => {
+    setValue('activity_type', '')
+  }, [dept, season, setValue])
 
   // Reset everything when dialog closes
   useEffect(() => {
-    if (!open) {
-      reset({ repeat_count: 1, assignment_type: 'singular' })
-      setSelectedMembers([])
-    }
+    if (!open) reset({ target: 1 })
   }, [open, reset])
 
-  function toggleMember(id) {
-    setSelectedMembers((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    )
-  }
-
   async function onSubmit(values) {
-    const payload = Object.fromEntries(
-      Object.entries(values).filter(([, v]) => v !== '' && v != null)
-    )
+    // auto-derive the unit from the selected activity
+    const unit = selectedActivity?.unit ?? 'NOS'
 
-    if (values.assignment_type === 'group') {
-      delete payload.assigned_to
-      payload.members = selectedMembers
-    } else {
-      delete payload.members
+    // title is auto-generated from activity + dept + season
+    const title = `${values.activity_type} — ${values.dept} (${values.season})`
+
+    const payload = {
+      ...Object.fromEntries(
+        Object.entries(values).filter(([, v]) => v !== '' && v != null)
+      ),
+      title,
+      unit,
+      assignment_type: 'singular',
     }
 
     try {
@@ -212,189 +150,214 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-on-surface/35 z-40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+        <Dialog.Overlay className="fixed inset-0 bg-on-surface/35 z-40 backdrop-blur-sm" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 bg-surface-container-lowest shadow-ghost p-6 max-h-[90vh] overflow-y-auto
-            data-[state=open]:animate-in data-[state=closed]:animate-out
-            data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0
-            data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+          className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2
+            bg-surface-container-lowest shadow-ghost p-6 max-h-[92vh] overflow-y-auto"
           aria-describedby={undefined}
         >
-          <div className="flex items-center justify-between mb-5">
-            <Dialog.Title className="text-xl font-black font-headline text-on-surface tracking-tight">
-              Create Task
-            </Dialog.Title>
+          {/* Header */}
+          <div className="flex items-start justify-between mb-5">
+            <div>
+              <Dialog.Title className="text-xl font-black font-headline text-on-surface tracking-tight">
+                Assign Task
+              </Dialog.Title>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Fill in the fields below to assign a task to field staff.
+              </p>
+            </div>
             <Dialog.Close
-              className="text-on-surface-variant hover:text-on-surface text-xl leading-none"
+              className="text-on-surface-variant hover:text-on-surface text-xl leading-none mt-1"
               aria-label="Close"
             >
               &times;
             </Dialog.Close>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
-            {/* Title */}
-            <Field label="Title" htmlFor="title" error={errors.title?.message}>
-              <input
-                id="title"
-                {...register('title')}
-                className={inputCls}
-                placeholder="e.g. Soil pH Sampling — North Valley"
-              />
-            </Field>
+          <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
 
-            {/* Activity Type + Dept */}
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Activity Type" htmlFor="activity_type" error={errors.activity_type?.message}>
-                <select id="activity_type" {...register('activity_type')} className={inputCls}>
-                  <option value="">Select…</option>
-                  {activityTypes.map((t) => (
-                    <option key={t.id ?? t} value={t.name ?? t}>{t.name ?? t}</option>
-                  ))}
-                </select>
-              </Field>
+            {/* ── Step 1 · Department ───────────────────────────────── */}
+            <section className="bg-surface-container-low p-4 space-y-3">
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary">
+                Step 1 — Select Department &amp; Season
+              </p>
 
-              <Field label="Department" htmlFor="dept" error={errors.dept?.message}>
-                <select id="dept" {...register('dept')} className={inputCls}>
-                  <option value="">Select…</option>
-                  <option value="Marketing">Marketing</option>
-                  <option value="Production">Production</option>
-                  <option value="R&D">R&amp;D</option>
-                  <option value="Processing">Processing</option>
-                  <option value="Field Ops">Field Ops</option>
-                </select>
-              </Field>
-            </div>
-
-            {/* Deadline */}
-            <Field label="Deadline" htmlFor="deadline" error={errors.deadline?.message}>
-              <input id="deadline" type="date" {...register('deadline')} className={inputCls} />
-            </Field>
-
-            {/* ── Assignment section ─────────────────────────────────── */}
-            <div className="bg-surface-container-low p-4 space-y-3">
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
-                  Assignment Type
-                </p>
-                {/* Toggle */}
-                <div className="inline-flex rounded overflow-hidden border border-outline-variant/30">
-                  {['singular', 'group'].map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => {
-                        setValue('assignment_type', type)
-                        setSelectedMembers([])
-                      }}
-                      className={`px-5 py-2 text-xs font-bold uppercase tracking-widest transition-colors ${
-                        assignmentType === type
-                          ? 'bg-primary text-on-primary'
-                          : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
-                      }`}
-                    >
-                      {type === 'singular' ? (
-                        <span className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[14px]">person</span>
-                          Singular
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[14px]">group</span>
-                          Group
-                        </span>
-                      )}
-                    </button>
-                  ))}
+              <Field label="Department" htmlFor="dept" required error={errors.dept?.message}>
+                <div className="mt-1">
+                  <SegmentedControl
+                    options={DEPARTMENTS}
+                    value={dept}
+                    onChange={(v) => setValue('dept', v, { shouldValidate: true })}
+                  />
+                  <input type="hidden" {...register('dept')} />
                 </div>
-              </div>
+              </Field>
 
-              {assignmentType === 'singular' ? (
-                <Field label="Assign To" htmlFor="assigned_to" error={errors.assigned_to?.message}>
-                  <select id="assigned_to" {...register('assigned_to')} className={inputCls}>
-                    <option value="">Unassigned</option>
-                    {fieldStaff.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
+              {dept && (
+                <Field label="Season" htmlFor="season" required error={errors.season?.message}>
+                  <div className="mt-1">
+                    <SegmentedControl
+                      options={SEASONS}
+                      value={season}
+                      onChange={(v) => setValue('season', v, { shouldValidate: true })}
+                    />
+                    <input type="hidden" {...register('season')} />
+                  </div>
+                </Field>
+              )}
+            </section>
+
+            {/* ── Step 2 · Activity Plan ────────────────────────────── */}
+            {dept && season && (
+              <section className="bg-surface-container-low p-4 space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-widest text-primary">
+                  Step 2 — Activity Plan
+                </p>
+
+                <Field label="Activity Plan" htmlFor="activity_type" required error={errors.activity_type?.message}>
+                  <select id="activity_type" {...register('activity_type')} className={inputCls}>
+                    <option value="">Select activity…</option>
+                    {activities.map((a) => (
+                      <option key={a.name} value={a.name}>{a.name}</option>
                     ))}
                   </select>
                 </Field>
-              ) : (
-                <div>
-                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2">
-                    Select Field Agents
-                  </p>
-                  <MemberPicker
-                    staff={fieldStaff}
-                    selected={selectedMembers}
-                    onToggle={toggleMember}
-                  />
-                  {selectedMembers.length === 0 && (
-                    <p className="text-xs text-on-surface-variant mt-1">
-                      Select at least one field agent for this group task.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
 
-            {/* Description */}
-            <Field label="Notes / Description" htmlFor="description" error={errors.description?.message}>
-              <textarea
-                id="description"
-                {...register('description')}
-                rows={3}
-                className={`${inputCls} resize-none`}
-                placeholder="Operational notes, instructions…"
-              />
-            </Field>
-
-            {/* Repetitions */}
-            <div className="bg-surface-container-low p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label.Root
-                    htmlFor="repeat_count"
-                    className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-0.5"
-                  >
-                    Repetitions Required
-                  </Label.Root>
-                  <p className="text-xs text-on-surface-variant">
-                    How many times must this task be completed?
-                  </p>
-                </div>
-                <input
-                  id="repeat_count"
-                  type="number"
-                  min={1}
-                  max={365}
-                  {...register('repeat_count')}
-                  className="w-20 bg-surface-container-lowest border-none px-3 py-2 text-sm font-bold text-center outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {Array.from({ length: Math.min(repeatCount, 20) }).map((_, i) => (
-                  <span
-                    key={i}
-                    className="w-6 h-6 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-[9px] font-bold text-primary"
-                  >
-                    {i + 1}
-                  </span>
-                ))}
-                {repeatCount > 20 && (
-                  <span className="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-[9px] font-bold text-on-surface-variant">
-                    +{repeatCount - 20}
-                  </span>
+                {/* Unit badge auto-derived from selected activity */}
+                {selectedActivity && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-on-surface-variant">Metric unit:</span>
+                    <span className="px-3 py-1 bg-primary/10 text-primary text-xs font-black uppercase tracking-wider">
+                      {selectedActivity.unit}
+                    </span>
+                    {requiresLocation && (
+                      <span className="px-2 py-1 bg-tertiary/10 text-tertiary text-xs font-bold uppercase tracking-wider">
+                        Location required
+                      </span>
+                    )}
+                  </div>
                 )}
-              </div>
-              {repeatCount > 1 && (
-                <p className="text-xs text-primary font-semibold">
-                  Assigned staff must submit {repeatCount} completions for this task.
-                </p>
-              )}
-              <FieldError message={errors.repeat_count?.message} />
-            </div>
+              </section>
+            )}
 
-            <div className="flex justify-end gap-3 pt-2">
+            {/* ── Step 3 · Common Fields ────────────────────────────── */}
+            {dept && season && activityName && (
+              <section className="space-y-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-primary px-0.5">
+                  Step 3 — Task Details
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* State */}
+                  <Field label="State" htmlFor="state" error={errors.state?.message}>
+                    <select id="state" {...register('state')} className={inputCls}>
+                      <option value="">Select state…</option>
+                      {INDIAN_STATES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {/* ASM / Assign To */}
+                  <Field label="ASM Name" htmlFor="assigned_to" error={errors.assigned_to?.message}>
+                    <select id="assigned_to" {...register('assigned_to')} className={inputCls}>
+                      <option value="">Unassigned</option>
+                      {fieldStaff.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+
+                  {/* ST / Territory */}
+                  <Field label="ST / Territory" htmlFor="territory" error={errors.territory?.message}>
+                    <input
+                      id="territory"
+                      {...register('territory')}
+                      className={inputCls}
+                      placeholder="e.g. Nashik North"
+                    />
+                  </Field>
+
+                  {/* Target Crop */}
+                  <Field label="Target Crop" htmlFor="crop" error={errors.crop?.message}>
+                    <input
+                      id="crop"
+                      {...register('crop')}
+                      className={inputCls}
+                      placeholder="e.g. Cotton, Tomato"
+                    />
+                  </Field>
+
+                  {/* Focus Product */}
+                  <Field label="Focus Product" htmlFor="product" error={errors.product?.message}>
+                    <input
+                      id="product"
+                      {...register('product')}
+                      className={inputCls}
+                      placeholder="e.g. PS-Hybrid 202"
+                    />
+                  </Field>
+
+                  {/* Nos / Target Count */}
+                  <Field label={`Nos / Target Count (${selectedActivity?.unit ?? 'NOS'})`} htmlFor="target" error={errors.target?.message}>
+                    <input
+                      id="target"
+                      type="number"
+                      min={1}
+                      {...register('target')}
+                      className={inputCls}
+                      placeholder="e.g. 50"
+                    />
+                  </Field>
+
+                  {/* Month */}
+                  <Field label="Month" htmlFor="month" error={errors.month?.message}>
+                    <input
+                      id="month"
+                      type="month"
+                      {...register('month')}
+                      className={inputCls}
+                    />
+                  </Field>
+
+                  {/* Deadline */}
+                  <Field label="Deadline" htmlFor="deadline" error={errors.deadline?.message}>
+                    <input
+                      id="deadline"
+                      type="date"
+                      {...register('deadline')}
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+
+                {/* Location — only for Production/R&D Pre-Season */}
+                {requiresLocation && (
+                  <Field label="Location / Field Site" htmlFor="location" required error={errors.location?.message}>
+                    <input
+                      id="location"
+                      {...register('location')}
+                      className={inputCls}
+                      placeholder="e.g. Survey No. 24, Village Pimpalner"
+                    />
+                  </Field>
+                )}
+
+                {/* Description */}
+                <Field label="Description / Instructions" htmlFor="description" error={errors.description?.message}>
+                  <textarea
+                    id="description"
+                    {...register('description')}
+                    rows={3}
+                    className={`${inputCls} resize-none`}
+                    placeholder="Operational notes, special instructions…"
+                  />
+                </Field>
+              </section>
+            )}
+
+            {/* ── Actions ───────────────────────────────────────────── */}
+            <div className="flex justify-end gap-3 pt-2 border-t border-outline-variant/20">
               <Dialog.Close asChild>
                 <button
                   type="button"
@@ -405,10 +368,10 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
               </Dialog.Close>
               <button
                 type="submit"
-                disabled={isSubmitting || (assignmentType === 'group' && selectedMembers.length === 0)}
-                className="px-5 py-2 bg-gradient-to-r from-primary to-primary-container text-on-primary text-sm font-bold uppercase tracking-wider disabled:opacity-50"
+                disabled={isSubmitting || !dept || !season || !activityName}
+                className="px-5 py-2 bg-primary text-on-primary text-sm font-bold uppercase tracking-wider disabled:opacity-50"
               >
-                {isSubmitting ? 'Creating…' : 'Create Task'}
+                {isSubmitting ? 'Assigning…' : 'Assign Task'}
               </button>
             </div>
           </form>

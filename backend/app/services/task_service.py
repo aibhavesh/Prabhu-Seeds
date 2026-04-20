@@ -149,7 +149,9 @@ async def update_task(task_id: int, data: TaskUpdate, db: AsyncSession) -> Task 
         if data.status == "running" and not task.started_at:
             task.started_at = date_type.today()
 
-    for field in ("title", "target", "deadline", "repeat_count", "assigned_to", "dept", "activity_type", "description", "assignment_type"):
+    for field in ("title", "target", "deadline", "repeat_count", "assigned_to", "dept", "season",
+                  "activity_type", "state", "territory", "location", "crop", "product", "month",
+                  "unit", "description", "assignment_type"):
         val = getattr(data, field, None)
         if val is not None:
             setattr(task, field, val)

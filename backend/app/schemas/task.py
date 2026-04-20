@@ -41,9 +41,14 @@ class TaskCreate(BaseModel):
     members: list[uuid.UUID] = []             # used when assignment_type == group
     district_id: str | None = None
     dept: str | None = None
+    season: str | None = None                 # Pre-Season | Post-Season
     activity_type: str | None = None
+    state: str | None = None
+    territory: str | None = None
+    location: str | None = None               # required for Production/R&D pre-season
     crop: str | None = None
     product: str | None = None
+    month: str | None = None
     target: int = 1
     unit: str = "NOS"
     deadline: _Date | None = None
@@ -59,7 +64,15 @@ class TaskUpdate(BaseModel):
     repeat_count: int | None = None
     assigned_to: uuid.UUID | None = None
     dept: str | None = None
+    season: str | None = None
     activity_type: str | None = None
+    state: str | None = None
+    territory: str | None = None
+    location: str | None = None
+    crop: str | None = None
+    product: str | None = None
+    month: str | None = None
+    unit: str | None = None
     description: str | None = None
     assignment_type: str | None = None
     members: list[uuid.UUID] | None = None  # replaces all existing members when provided
@@ -73,9 +86,14 @@ class TaskOut(BaseModel):
     assigned_to_name: str | None = None
     district_id: str | None
     dept: str | None
+    season: str | None = None
     activity_type: str | None
+    state: str | None = None
+    territory: str | None = None
+    location: str | None = None
     crop: str | None
     product: str | None
+    month: str | None = None
     target: int
     unit: str
     status: str
