@@ -1,6 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl
-import json
+from pydantic import field_validator
 from typing import Any
 
 
@@ -36,6 +35,25 @@ class Settings(BaseSettings):
 
     OTP_MAX_REQUESTS: int = 3
     OTP_RATE_LIMIT_MINUTES: int = 10
+
+    @field_validator("JWT_EXPIRATION_HOURS", mode="before")
+    @classmethod
+    def coerce_jwt_hours(cls, v: Any) -> int:
+        # Guard against Railway Variables accidentally set to 'false'/'true'
+        if isinstance(v, str) and v.lower() in ("false", "true", ""):
+            return 8
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 8
+
+    @field_validator("OTP_MAX_REQUESTS", "OTP_RATE_LIMIT_MINUTES", mode="before")
+    @classmethod
+    def coerce_int_fields(cls, v: Any) -> int:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 3
 
     @property
     def effective_jwt_secret(self) -> str:
