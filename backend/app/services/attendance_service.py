@@ -110,7 +110,12 @@ async def check_out(user_id: uuid.UUID, data: CheckOutRequest, db: AsyncSession)
         extra_wps = [checkout_wp]
 
     # Auto-calculate km: sum Haversine distances across all waypoints
-    all_wps = sorted(
+    # Exclude heartbeat-only waypoints from distance calculation — they don't represent movement
+    movement_wps = sorted(
+        [w for w in [*attendance.waypoints, *extra_wps] if w.type != 'heartbeat'],
+        key=lambda w: w.timestamp,
+    )
+    all_wps = movement_wps if len(movement_wps) >= 2 else sorted(
         [*attendance.waypoints, *extra_wps],
         key=lambda w: w.timestamp,
     )
@@ -119,7 +124,6 @@ async def check_out(user_id: uuid.UUID, data: CheckOutRequest, db: AsyncSession)
         # Only count legs >= 100 m — filters GPS drift from stationary heartbeats
         computed_km = calculate_route_km(coords, min_leg_m=100)
     else:
-        # Only one waypoint (check-in = check-out spot) — no movement
         computed_km = 0.0
 
     attendance.check_out = checkout_time

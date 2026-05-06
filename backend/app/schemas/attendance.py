@@ -7,12 +7,13 @@ from pydantic import BaseModel
 class CheckInRequest(BaseModel):
     lat: Decimal
     lng: Decimal
+    address: str | None = None
 
 
 class CheckOutRequest(BaseModel):
     lat: Decimal
     lng: Decimal
-    km: Decimal
+    km: Decimal = Decimal("0")  # optional — backend auto-calculates from waypoints
 
 
 class WaypointCreate(BaseModel):

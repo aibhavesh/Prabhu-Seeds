@@ -21,6 +21,46 @@ DEPT_LABEL = {
 router = APIRouter()
 
 
+@router.get("/{attendance_id}/waypoints", response_model=list[WaypointOut])
+async def get_waypoints(
+    attendance_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list:
+    """
+    Return all GPS waypoints for a given attendance record.
+    Owner sees any record; Manager sees only their subordinates' records.
+    Used by the mobile app's route map — only called when km >= 5 (client-side gate).
+    """
+    from sqlalchemy.orm import selectinload
+    from app.models.attendance import GpsWaypoint
+
+    if current_user.role not in ("OWNER", "MANAGER"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Fetch the attendance record with its owner
+    result = await db.execute(
+        select(Attendance).options(selectinload(Attendance.user))
+        .where(Attendance.id == attendance_id)
+    )
+    att = result.scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance record not found")
+
+    # Manager scope check
+    if current_user.role == "MANAGER":
+        if str(att.user.manager_id) != str(current_user.id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    # Return waypoints sorted by timestamp
+    wp_result = await db.execute(
+        select(GpsWaypoint)
+        .where(GpsWaypoint.attendance_id == attendance_id)
+        .order_by(GpsWaypoint.timestamp.asc())
+    )
+    return wp_result.scalars().all()
+
+
 @router.get("/today", response_model=AttendanceOut | None)
 async def get_today(
     current_user: Annotated[User, Depends(get_current_user)],

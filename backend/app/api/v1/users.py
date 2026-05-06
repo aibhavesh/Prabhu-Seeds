@@ -1,6 +1,7 @@
 import uuid
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -10,6 +11,60 @@ from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.services import user_service
 
 router = APIRouter()
+
+
+@router.get("/field-workload", response_model=list[dict])
+async def field_users_workload(
+    _: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list:
+    """
+    Returns all active FIELD users with their current active task count.
+    Used by the task creation form to show workload status per agent.
+    """
+    from sqlalchemy import func, case
+    from app.models.task import Task, TaskMember
+    from app.schemas.user import UserOut
+
+    # Count active (non-completed, non-cancelled) tasks per user
+    # via direct assignment OR group membership
+    singular_counts = (
+        select(Task.assigned_to.label("user_id"), func.count().label("cnt"))
+        .where(Task.assigned_to.is_not(None), Task.status.not_in(["completed", "cancelled"]))
+        .group_by(Task.assigned_to)
+        .subquery()
+    )
+    group_counts = (
+        select(TaskMember.user_id.label("user_id"), func.count().label("cnt"))
+        .join(Task, Task.id == TaskMember.task_id)
+        .where(Task.status.not_in(["completed", "cancelled"]))
+        .group_by(TaskMember.user_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(User).where(User.role == "FIELD", User.is_active.is_(True)).order_by(User.name)
+    )
+    users = result.scalars().all()
+
+    # Fetch counts in bulk
+    sc_result = await db.execute(select(singular_counts))
+    sc_map = {str(row.user_id): row.cnt for row in sc_result.fetchall()}
+
+    gc_result = await db.execute(select(group_counts))
+    gc_map = {str(row.user_id): row.cnt for row in gc_result.fetchall()}
+
+    return [
+        {
+            "id": str(u.id),
+            "name": u.name,
+            "mobile": u.mobile,
+            "hq": u.hq,
+            "state": u.state,
+            "active_tasks": sc_map.get(str(u.id), 0) + gc_map.get(str(u.id), 0),
+        }
+        for u in users
+    ]
 
 
 @router.get("/", response_model=list[UserOut])

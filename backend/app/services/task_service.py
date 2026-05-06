@@ -102,22 +102,38 @@ async def list_tasks(
     result = await db.execute(query)
     tasks = list(result.scalars().all())
 
+    # OWNER sees everything
     if user.role == "OWNER":
         return tasks
 
+    # Get all subordinate IDs for this user
     sub_ids = await get_subordinate_ids(user.id, db)
 
-    # Group tasks the user is a member of (not necessarily assigned_to)
+    # Tasks this user is directly a member of
     member_rows = await db.execute(
         select(TaskMember.task_id).where(TaskMember.user_id == user.id)
     )
     member_task_ids = {row[0] for row in member_rows}
 
-    return [
-        t for t in tasks
-        if can_see_task(t.created_by, t.assigned_to, user.id, user.role, sub_ids)
-        or t.id in member_task_ids
-    ]
+    # For MANAGER: also collect task_ids where ANY subordinate is a member
+    sub_member_task_ids: set[int] = set()
+    if sub_ids:
+        sub_member_rows = await db.execute(
+            select(TaskMember.task_id).where(TaskMember.user_id.in_(sub_ids))
+        )
+        sub_member_task_ids = {row[0] for row in sub_member_rows}
+
+    visible = []
+    for t in tasks:
+        if can_see_task(t.created_by, t.assigned_to, user.id, user.role, sub_ids):
+            visible.append(t)
+        elif t.id in member_task_ids:
+            visible.append(t)
+        elif t.id in sub_member_task_ids:
+            # Manager can see group tasks assigned to their subordinates
+            visible.append(t)
+
+    return visible
 
 
 async def list_tasks_with_meta(
@@ -149,6 +165,30 @@ async def list_tasks_with_meta(
         tasks=task_outs,
         meta=TaskMeta(total=total, pending=pending, active=active, efficiency=efficiency),
     )
+
+
+async def get_task_by_id(task_id: int, user: "User", db: AsyncSession) -> TaskOut | None:  # type: ignore[name-defined]
+    result = await db.execute(
+        select(Task).options(joinedload(Task.assignee)).where(Task.id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        return None
+
+    # Check visibility
+    if user.role != "OWNER":
+        sub_ids = await get_subordinate_ids(user.id, db)
+        member_row = await db.execute(
+            select(TaskMember.task_id).where(
+                TaskMember.task_id == task_id,
+                TaskMember.user_id.in_([user.id] + list(sub_ids))
+            )
+        )
+        is_member = member_row.first() is not None
+        if not can_see_task(task.created_by, task.assigned_to, user.id, user.role, sub_ids) and not is_member:
+            return None
+
+    return await _enrich(task, db, user.id)
 
 
 async def create_task(data: TaskCreate, created_by: uuid.UUID, db: AsyncSession) -> Task:

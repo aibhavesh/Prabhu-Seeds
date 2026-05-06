@@ -58,11 +58,13 @@ async def live_positions(
     # Role + active filter in Python (avoids double-JOIN bug with async SQLAlchemy)
     records = [
         r for r in records
-        if r.user and r.user.role in ("FIELD", "MANAGER") and r.user.is_active
+        if r.user and r.user.role.upper() in ("FIELD", "MANAGER") and r.user.is_active
     ]
 
-    if current_user.role == "MANAGER":
-        records = [r for r in records if r.user.manager_id == current_user.id]
+    if current_user.role.upper() == "MANAGER":
+        # Compare as strings to avoid UUID type mismatch between asyncpg UUID objects
+        mgr_id_str = str(current_user.id)
+        records = [r for r in records if str(r.user.manager_id) == mgr_id_str]
 
     # Build base employee dicts and collect GPS coords for concurrent geocoding
     raw = []

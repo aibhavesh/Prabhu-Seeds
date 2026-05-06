@@ -10,6 +10,29 @@ from app.services import task_service
 
 router = APIRouter()
 
+# Status aliases: mobile sends "pending"/"active", DB stores "assigned"/"running"
+STATUS_ALIAS = {
+    "pending": "assigned",
+    "active": "running",
+    "assigned": "assigned",
+    "running": "running",
+    "completed": "completed",
+    "cancelled": "cancelled",
+}
+
+
+@router.get("/export/csv")
+async def export_csv(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    csv_data = await task_service.export_tasks_csv(current_user, db)
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=tasks.csv"},
+    )
+
 
 @router.get("/", response_model=TaskListResponse)
 async def list_tasks(
@@ -23,10 +46,12 @@ async def list_tasks(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> TaskListResponse:
+    # Normalize status alias so mobile "pending"→"assigned", "active"→"running"
+    normalized_status = STATUS_ALIAS.get(status.lower(), status) if status else None
     return await task_service.list_tasks_with_meta(
         current_user, db,
         skip=skip, limit=limit,
-        status=status, dept=dept,
+        status=normalized_status, dept=dept,
         search=search, date_from=date_from, date_to=date_to,
     )
 
@@ -39,6 +64,18 @@ async def create_task(
 ) -> object:
     task = await task_service.create_task(body, current_user.id, db)
     return TaskOut.model_validate(task)
+
+
+@router.get("/{task_id}", response_model=TaskOut)
+async def get_task(
+    task_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> object:
+    task = await task_service.get_task_by_id(task_id, current_user, db)
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return task
 
 
 @router.patch("/{task_id}", response_model=TaskOut)
@@ -85,16 +122,3 @@ async def list_task_records(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> object:
     return await task_service.get_task_records(task_id, db)
-
-
-@router.get("/export/csv")
-async def export_csv(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> Response:
-    csv_data = await task_service.export_tasks_csv(current_user, db)
-    return Response(
-        content=csv_data,
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=tasks.csv"},
-    )
