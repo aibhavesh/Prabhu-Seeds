@@ -16,8 +16,9 @@ async def list_activity_types(
     _: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     department: str | None = Query(default=None),
+    season: str | None = Query(default=None),
 ) -> list:
-    return await activity_type_service.list_activity_types(db, department=department)
+    return await activity_type_service.list_activity_types(db, department=department, season=season)
 
 
 @router.post("/", response_model=ActivityTypeOut, status_code=status.HTTP_201_CREATED)
