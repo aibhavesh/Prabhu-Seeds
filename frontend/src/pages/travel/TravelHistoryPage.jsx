@@ -102,38 +102,22 @@ function Timeline({ updates }) {
   )
 }
 
-// ── Completed-journey sessionStorage helpers ───────────────────────────────────
-// Persists the completed-but-not-yet-saved journey so a page refresh between
-// "End Journey" and "Save Journey" doesn't silently discard the data.
-
-const COMPLETED_KEY = 'travel_journey_completed'
-
-function saveCompleted(data) {
-  try { sessionStorage.setItem(COMPLETED_KEY, JSON.stringify(data)) } catch { /* quota */ }
-}
-function loadCompleted() {
-  try {
-    const raw = sessionStorage.getItem(COMPLETED_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (typeof parsed?.startTime !== 'number' || typeof parsed?.totalKm !== 'number') return null
-    return parsed
-  } catch { return null }
-}
-function clearCompleted() {
-  try { sessionStorage.removeItem(COMPLETED_KEY) } catch { /* ignore */ }
-}
-
 // ── Journey Tracker ────────────────────────────────────────────────────────────
+// "End Journey" immediately POSTs to the backend — no intermediate "Save" step.
+// This means cache clears, tab kills, and page refreshes can't lose the journey
+// once the user has tapped End: it's already in the database.
+//
+// If the network call fails we keep `failed` state so the user can retry or
+// discard — no data is written to the backend until the retry succeeds.
 
 function JourneyTracker({ user, onJourneyAdded }) {
   const queryClient = useQueryClient()
   const { active, startTime, totalKm, elapsed, gpsError, start, stop } = useTravelJourney()
 
-  // Completed journey waiting for "Save" action — restored from sessionStorage on
-  // mount so a page refresh between "End Journey" and "Save Journey" doesn't lose it.
-  const [completed, setCompleted] = useState(() => loadCompleted())
-  const [saving, setSaving] = useState(false)
+  // `failed` holds journey data only when the auto-save on End Journey errored.
+  // Normal flow: active → (End Journey) → saving → done (no intermediate state).
+  const [failed, setFailed]   = useState(null)
+  const [saving, setSaving]   = useState(false)
 
   // Pending journeys (accumulated, not yet printed)
   const [pending, setPending] = useState(() => getPendingJourneys())
@@ -142,52 +126,62 @@ function JourneyTracker({ user, onJourneyAdded }) {
   const refreshPending = useCallback(() => setPending(getPendingJourneys()), [])
 
   function handleStart() {
-    setCompleted(null)
+    setFailed(null)
     start()
     toast.success('Journey started — GPS is tracking.')
   }
 
-  function handleStop() {
-    if (!startTime) return   // guard: can't stop a journey that never started
-    const endTime = Date.now()
-    stop()
-    const data = { startTime, endTime, totalKm }
-    setCompleted(data)
-    saveCompleted(data)  // survive a page refresh before the user clicks Save
+  async function saveJourney(data) {
+    const { startTime: st, endTime, totalKm: km } = data
+    const amount  = Math.max(parseFloat((km * RATE_PER_KM).toFixed(2)), 1)
+    const depTime = format(new Date(st), 'HH:mm')
+    const arrTime = format(new Date(endTime), 'HH:mm')
+
+    await apiClient.post('/api/v1/expenses/', {
+      date:        format(new Date(st), 'yyyy-MM-dd'),
+      type:        'travel',
+      description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
+      amount,
+      km:          parseFloat(Math.max(km, 0).toFixed(2)),
+      rate:        RATE_PER_KM,
+    })
+
+    addPendingJourney(data)
+    refreshPending()
+    queryClient.invalidateQueries({ queryKey: ['travel-history'] })
+    onJourneyAdded?.()
   }
 
-  async function handleSave() {
-    if (!completed) return
+  async function handleStop() {
+    if (!startTime) return
+    const endTime = Date.now()
+    stop()                               // clears GPS watch + useTravelJourney state
+    const data = { startTime, endTime, totalKm }
+
     setSaving(true)
     try {
-      const { startTime: st, endTime, totalKm: km } = completed
-      // Use at least ₹1 so backend doesn't reject a zero-amount record
-      const amount  = Math.max(parseFloat((km * RATE_PER_KM).toFixed(2)), 1)
-      const depTime = format(new Date(st), 'HH:mm')
-      const arrTime = format(new Date(endTime), 'HH:mm')
-
-      // Save to backend
-      await apiClient.post('/api/v1/expenses/', {
-        date: format(new Date(st), 'yyyy-MM-dd'),
-        type: 'travel',
-        description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
-        amount,
-        km: parseFloat(Math.max(km, 0).toFixed(2)),
-        rate: RATE_PER_KM,
-      })
-
-      // Add to local pending list (for sheet accumulation)
-      addPendingJourney(completed)
-      refreshPending()
-      queryClient.invalidateQueries({ queryKey: ['travel-history'] })
-      onJourneyAdded?.()
-
-      clearCompleted()
-      toast.success('Journey saved! It will be included in the next sheet print.')
-      setCompleted(null)
+      await saveJourney(data)
+      toast.success('Journey submitted!')
     } catch (err) {
-      const detail = err?.response?.data?.detail ?? err?.message ?? 'Failed to save journey.'
-      toast.error(detail)
+      // Save failed — hold the data so the user can retry
+      setFailed(data)
+      const detail = err?.response?.data?.detail ?? err?.message ?? 'Network error'
+      toast.error(`Could not submit journey — ${detail}. Tap Retry to try again.`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRetry() {
+    if (!failed) return
+    setSaving(true)
+    try {
+      await saveJourney(failed)
+      setFailed(null)
+      toast.success('Journey submitted!')
+    } catch (err) {
+      const detail = err?.response?.data?.detail ?? err?.message ?? 'Network error'
+      toast.error(`Still failing — ${detail}`)
     } finally {
       setSaving(false)
     }
@@ -249,35 +243,35 @@ function JourneyTracker({ user, onJourneyAdded }) {
         </div>
       )}
 
-      {/* ── Completed journey — awaiting save ── */}
-      {completed && (
-        <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4 border-l-4 border-primary">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-            Journey Complete — Save to add to current sheet
+      {/* ── Save failed — retry panel ── */}
+      {failed && (
+        <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4 border-l-4 border-error">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-error">
+            Submission Failed — Journey not yet saved
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Stat label="Date"      value={format(new Date(completed.startTime), 'dd MMM yyyy')} />
-            <Stat label="Departure" value={format(new Date(completed.startTime), 'HH:mm')} />
-            <Stat label="Arrival"   value={format(new Date(completed.endTime), 'HH:mm')} />
-            <Stat label="Duration"  value={formatDuration(Math.floor((completed.endTime - completed.startTime) / 1000))} />
-            <Stat label="Distance"  value={`${completed.totalKm.toFixed(2)} km`} highlight />
-            <Stat label="Est. Amount" value={`₹${(completed.totalKm * RATE_PER_KM).toFixed(2)}`} />
+            <Stat label="Date"      value={format(new Date(failed.startTime), 'dd MMM yyyy')} />
+            <Stat label="Departure" value={format(new Date(failed.startTime), 'HH:mm')} />
+            <Stat label="Arrival"   value={format(new Date(failed.endTime), 'HH:mm')} />
+            <Stat label="Duration"  value={formatDuration(Math.floor((failed.endTime - failed.startTime) / 1000))} />
+            <Stat label="Distance"  value={`${failed.totalKm.toFixed(2)} km`} highlight />
+            <Stat label="Est. Amount" value={`₹${(failed.totalKm * RATE_PER_KM).toFixed(2)}`} />
           </div>
           <p className="text-xs text-on-surface-variant">
-            Place of departure, arrival, and place of stay will be filled manually in the sheet.
+            Check your connection then tap Retry. Tap Discard only if you want to abandon this journey.
           </p>
           <div className="flex gap-2 flex-wrap">
             <button
               type="button"
-              onClick={handleSave}
+              onClick={handleRetry}
               disabled={saving}
               className="px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save Journey'}
+              {saving ? 'Retrying…' : 'Retry'}
             </button>
             <button
               type="button"
-              onClick={() => { clearCompleted(); setCompleted(null) }}
+              onClick={() => setFailed(null)}
               className="px-4 py-2 bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-widest"
             >
               Discard
@@ -287,7 +281,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
       )}
 
       {/* ── Active journey ── */}
-      {active && !completed && (
+      {active && !failed && (
         <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4">
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -304,15 +298,16 @@ function JourneyTracker({ user, onJourneyAdded }) {
           <button
             type="button"
             onClick={handleStop}
-            className="px-4 py-2 bg-error text-white text-xs font-bold uppercase tracking-widest"
+            disabled={saving}
+            className="px-4 py-2 bg-error text-white text-xs font-bold uppercase tracking-widest disabled:opacity-60"
           >
-            End Journey
+            {saving ? 'Submitting…' : 'End Journey'}
           </button>
         </div>
       )}
 
-      {/* ── Idle — no active journey, no completed one ── */}
-      {!active && !completed && (
+      {/* ── Idle — no active journey, no failed save ── */}
+      {!active && !failed && (
         <div className="bg-surface-container-lowest shadow-ghost p-4 flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-sm font-bold text-on-surface">Start a Journey</p>
