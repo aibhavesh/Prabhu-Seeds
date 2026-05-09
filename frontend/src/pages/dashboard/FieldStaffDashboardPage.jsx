@@ -8,7 +8,6 @@ import { useDutyStore } from '@/store/dutyStore'
 import { useTasks } from '@/pages/tasks/hooks/useTasks'
 import { useCheckIn, useCheckOut, useMyMonthlyReport, useMyTodayAttendance } from '@/pages/attendance/hooks/useAttendance'
 import { useTravelHistory } from '@/pages/travel/hooks/useTravel'
-import { useGpsWatcher } from '@/hooks/useGpsWatcher'
 
 // Maps backend task status to display label + pill colour
 const STATUS_META = {
@@ -46,9 +45,6 @@ export default function FieldStaffDashboardPage() {
   const { data: monthlyReport } = useMyMonthlyReport(currentMonth)
   const { data: travelData } = useTravelHistory({ month: currentMonth })
   const { data: todayAttendance, isSuccess: todayLoaded } = useMyTodayAttendance()
-
-  // Continuously track position while on duty — posts a waypoint every 100 m or 5 min
-  useGpsWatcher({ attendanceId: todayAttendance?.id ?? null, enabled: checkedIn })
 
   // Initialise from persisted start time so navigation doesn't reset the clock
   const [elapsedSeconds, setElapsedSeconds] = useState(() =>

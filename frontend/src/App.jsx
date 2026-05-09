@@ -5,6 +5,9 @@ import { queryClient } from '@/lib/queryClient'
 import { authGuard } from '@/lib/authGuard'
 import { getDashboardRoute } from '@/lib/navConfig'
 import { useAuthStore } from '@/store/authStore'
+import { useDutyStore } from '@/store/dutyStore'
+import { useGpsWatcher } from '@/hooks/useGpsWatcher'
+import { useMyTodayAttendance } from '@/pages/attendance/hooks/useAttendance'
 
 import MobileInputPage        from '@/pages/auth/MobileInputPage'
 import OTPVerifyPage           from '@/pages/auth/OTPVerifyPage'
@@ -21,6 +24,28 @@ import MyLeavesPage            from '@/pages/leave/MyLeavesPage'
 import TravelClaimsPage        from '@/pages/travel/TravelClaimsPage'
 import TravelHistoryPage       from '@/pages/travel/TravelHistoryPage'
 import LiveTrackingPage        from '@/pages/tracking/LiveTrackingPage'
+
+/**
+ * Keeps GPS waypoints flowing to the DB for the entire session, regardless
+ * of which page the field agent is on.  Previously useGpsWatcher lived only
+ * inside FieldStaffDashboardPage, so navigating to /travel/history (the
+ * journey tracker) would unmount that page, clearWatch(), and silently stop
+ * recording — leaving the route viewer with an empty waypoint list.
+ *
+ * This component renders null; it just holds the watcher alive in the React
+ * tree above the router so page transitions never tear it down.
+ */
+function FieldGpsTracker() {
+  const { checkedIn } = useDutyStore()
+  const { data: todayAttendance } = useMyTodayAttendance()
+
+  useGpsWatcher({
+    attendanceId: todayAttendance?.id ?? null,
+    enabled: checkedIn,
+  })
+
+  return null
+}
 
 /** Redirect /dashboard → role-specific dashboard */
 function dashboardRedirectLoader() {
@@ -56,11 +81,22 @@ const router = createBrowserRouter([
   { path: '/settings/platform',          loader: authGuard, element: <PlatformSettingsPage /> },
 ])
 
+function AppInner() {
+  const role = useAuthStore((s) => s.user?.role)
+  return (
+    <>
+      {/* Keep GPS alive across page navigation for field staff */}
+      {role === 'FIELD' && <FieldGpsTracker />}
+      <RouterProvider router={router} />
+      <Toaster position="top-center" />
+    </>
+  )
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-      <Toaster position="top-center" />
+      <AppInner />
     </QueryClientProvider>
   )
 }
