@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { endOfMonth, format, startOfMonth } from 'date-fns'
+import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import generatePDF from 'react-to-pdf'
 import {
   Bar,
@@ -73,6 +73,29 @@ function getCurrentMonthRange() {
     fromDate: formatInputDate(startOfMonth(now)),
     toDate: formatInputDate(endOfMonth(now)),
   }
+}
+
+function getPreviousRange(fromDate, toDate) {
+  const from = parseISO(fromDate)
+  const to   = parseISO(toDate)
+  return {
+    fromDate: formatInputDate(subMonths(from, 1)),
+    toDate:   formatInputDate(subMonths(to,   1)),
+  }
+}
+
+function calcTrend(current, previous, { invert = false } = {}) {
+  const curr = safeNumber(current)
+  const prev = safeNumber(previous)
+  if (curr === prev) return { direction: 'flat', deltaPct: 0, positive: true }
+  if (prev === 0) {
+    const positive = invert ? curr <= prev : curr >= prev
+    return { direction: curr > prev ? 'up' : 'down', deltaPct: 100, positive }
+  }
+  const deltaPct  = Math.abs(((curr - prev) / prev) * 100)
+  const direction = curr > prev ? 'up' : 'down'
+  const positive  = invert ? curr < prev : curr > prev
+  return { direction, deltaPct, positive }
 }
 
 
@@ -179,12 +202,11 @@ function buildMockOwnerDashboard() {
 async function fetchOwnerDashboard({ fromDate, toDate }) {
   try {
     const response = await apiClient.get('/api/v1/dashboard/', {
-      params: { from: fromDate, to: toDate },
+      // Backend expects from_date / to_date (snake_case)
+      params: { from_date: fromDate, to_date: toDate },
     })
     const real = normalizeOwnerDashboard(response.data)
     if (!real) return buildMockOwnerDashboard()
-    // Keep mock state map + top-performers for visual richness until backend
-    // provides per-state aggregations. Real KPI summary always takes priority.
     const mock = buildMockOwnerDashboard()
     return {
       ...real,
@@ -203,12 +225,17 @@ function completionFill(completionPct) {
   return `hsl(133 48% ${lightness}%)`
 }
 
-function KpiCard({ label, value, accent }) {
+function KpiCard({ label, value, trend, accent }) {
+  const trendIcon = trend.direction === 'up' ? 'north' : trend.direction === 'down' ? 'south' : 'remove'
   return (
     <article className="bg-surface-container-lowest shadow-ghost px-4 py-4 relative overflow-hidden">
       <span className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: accent }} />
       <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{label}</p>
       <p className="text-3xl md:text-[2rem] font-black font-headline mt-1 text-on-surface">{value}</p>
+      <div className={`mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider ${trend.positive ? 'text-emerald-700' : 'text-error'}`}>
+        <span className="material-symbols-outlined text-[14px]" aria-hidden="true">{trendIcon}</span>
+        {trend.deltaPct.toFixed(1)}% vs prev period
+      </div>
     </article>
   )
 }
@@ -324,43 +351,57 @@ export default function OwnerDashboardPage() {
 
   const dashboardRef = useRef(null)
 
+  const previousRange = useMemo(() => getPreviousRange(fromDate, toDate), [fromDate, toDate])
+
   const dashboardQuery = useQuery({
     queryKey: ['owner-dashboard', fromDate, toDate],
     queryFn: () => fetchOwnerDashboard({ fromDate, toDate }),
     placeholderData: (previous) => previous,
   })
 
-  const dashboard = dashboardQuery.data ?? buildMockOwnerDashboard()
+  const previousQuery = useQuery({
+    queryKey: ['owner-dashboard', previousRange.fromDate, previousRange.toDate],
+    queryFn: () => fetchOwnerDashboard({ fromDate: previousRange.fromDate, toDate: previousRange.toDate }),
+    placeholderData: (previous) => previous,
+  })
+
+  const dashboard      = dashboardQuery.data ?? buildMockOwnerDashboard()
+  const prevSummary    = previousQuery.data?.summary ?? buildMockOwnerDashboard().summary
 
   const kpis = useMemo(
     () => [
       {
         label: 'Total Tasks',
         value: Math.round(dashboard.summary.totalTasks).toLocaleString('en-IN'),
+        trend: calcTrend(dashboard.summary.totalTasks, prevSummary.totalTasks),
         accent: '#2f8f3f',
       },
       {
         label: 'Completion %',
         value: `${dashboard.summary.completionPct.toFixed(1)}%`,
+        trend: calcTrend(dashboard.summary.completionPct, prevSummary.completionPct),
         accent: '#1b6f89',
       },
       {
         label: 'Avg Attendance %',
         value: `${dashboard.summary.avgAttendancePct.toFixed(1)}%`,
+        trend: calcTrend(dashboard.summary.avgAttendancePct, prevSummary.avgAttendancePct),
         accent: '#3b8e6a',
       },
       {
         label: 'Travel Spend',
         value: formatInr(dashboard.summary.travelSpend),
+        trend: calcTrend(dashboard.summary.travelSpend, prevSummary.travelSpend, { invert: true }),
         accent: '#8b5a1f',
       },
       {
         label: 'Pending Travel Approvals',
         value: String(Math.round(dashboard.summary.pendingApprovals)),
+        trend: calcTrend(dashboard.summary.pendingApprovals, prevSummary.pendingApprovals, { invert: true }),
         accent: '#7b4f16',
       },
     ],
-    [dashboard.summary]
+    [dashboard.summary, prevSummary]
   )
 
   function onFromDateChange(nextDate) {

@@ -1,6 +1,7 @@
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast
+from sqlalchemy.types import Date as DateType
 
 from app.models.task import Task
 from app.models.expense import Expense
@@ -10,15 +11,22 @@ from app.models.user import User
 from app.services.visibility import get_subordinate_ids
 
 
-async def get_dashboard_kpis(user: "User", db: AsyncSession) -> dict:  # type: ignore[name-defined]
-    sub_ids = await get_subordinate_ids(user.id, db)
+async def get_dashboard_kpis(
+    user: "User",  # type: ignore[name-defined]
+    db: AsyncSession,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> dict:
     today = date.today()
-    first_of_month = date(today.year, today.month, 1)
+    # Default to current calendar month when no range supplied
+    effective_from = from_date or date(today.year, today.month, 1)
+    effective_to   = to_date   or today
 
-    is_owner = user.role == "OWNER"
+    sub_ids    = await get_subordinate_ids(user.id, db)
+    is_owner   = user.role == "OWNER"
     visible_ids = [user.id, *sub_ids]
 
-    # ── Dealers ───────────────────────────────────────────────────────────────
+    # ── Dealers (not date-scoped — count is a snapshot) ───────────────────────
     if is_owner:
         dealer_count = (await db.execute(
             select(func.count()).select_from(Dealer)
@@ -29,64 +37,74 @@ async def get_dashboard_kpis(user: "User", db: AsyncSession) -> dict:  # type: i
             .where(DealerAssignment.user_id.in_(visible_ids))
         )).scalar() or 0
 
-    # ── Tasks (role-scoped) ───────────────────────────────────────────────────
+    # ── Tasks created within the period ──────────────────────────────────────
+    # Use cast(created_at, Date) so TIMESTAMP compares cleanly with date bounds.
+    task_date = cast(Task.created_at, DateType())
     if is_owner:
-        task_filter = True
+        task_scope = (task_date >= effective_from) & (task_date <= effective_to)
     else:
-        task_filter = (
-            (Task.assigned_to.in_(visible_ids)) | (Task.created_by.in_(visible_ids))
+        task_scope = (
+            ((Task.assigned_to.in_(visible_ids)) | (Task.created_by.in_(visible_ids)))
+            & (task_date >= effective_from)
+            & (task_date <= effective_to)
         )
 
     total_tasks = (await db.execute(
-        select(func.count()).select_from(Task).where(task_filter)
+        select(func.count()).select_from(Task).where(task_scope)
     )).scalar() or 0
 
     completed_tasks = (await db.execute(
-        select(func.count()).select_from(Task).where(task_filter, Task.status == "completed")
+        select(func.count()).select_from(Task)
+        .where(task_scope, Task.status == "completed")
     )).scalar() or 0
 
     active_tasks = (await db.execute(
-        select(func.count()).select_from(Task).where(task_filter, Task.status == "running")
+        select(func.count()).select_from(Task)
+        .where(task_scope, Task.status == "running")
     )).scalar() or 0
 
     completion_pct = round(completed_tasks / total_tasks * 100, 1) if total_tasks > 0 else 0.0
 
-    # ── Travel spend — approved expenses this month ────────────────────────────
-    travel_user_filter = (
-        True if is_owner else Expense.user_id.in_(visible_ids)
-    )
+    # ── Travel expenses within the period ────────────────────────────────────
+    exp_scope = (Expense.date >= effective_from) & (Expense.date <= effective_to)
+    if not is_owner:
+        exp_scope = exp_scope & Expense.user_id.in_(visible_ids)
 
     travel_spend = float((await db.execute(
         select(func.sum(Expense.amount))
-        .where(
-            Expense.type == "travel",
-            Expense.status == "approved",
-            Expense.date >= first_of_month,
-            travel_user_filter,
-        )
+        .where(exp_scope, Expense.type == "travel", Expense.status == "approved")
     )).scalar() or 0)
 
-    # ── Pending travel approvals ───────────────────────────────────────────────
     pending_approvals = (await db.execute(
         select(func.count()).select_from(Expense)
-        .where(
-            Expense.type == "travel",
-            Expense.status == "pending",
-            travel_user_filter,
-        )
+        .where(exp_scope, Expense.type == "travel", Expense.status == "pending")
     )).scalar() or 0
 
-    # ── Pending expenses (all types) ──────────────────────────────────────────
     pending_expenses = (await db.execute(
         select(func.count()).select_from(Expense)
-        .where(
-            Expense.status == "pending",
-            True if is_owner else Expense.user_id.in_(visible_ids),
-        )
+        .where(exp_scope, Expense.status == "pending")
     )).scalar() or 0
 
-    # ── Team check-ins today ──────────────────────────────────────────────────
+    # ── Attendance within the period ──────────────────────────────────────────
     team_size = len(sub_ids)
+    avg_attendance_pct = 0.0
+
+    if sub_ids:
+        att_present = (await db.execute(
+            select(func.count()).select_from(Attendance)
+            .where(
+                Attendance.user_id.in_(sub_ids),
+                Attendance.date >= effective_from,
+                Attendance.date <= effective_to,
+                Attendance.check_in.isnot(None),
+            )
+        )).scalar() or 0
+
+        days_in_period  = (effective_to - effective_from).days + 1
+        total_possible  = team_size * days_in_period
+        avg_attendance_pct = round(att_present / total_possible * 100, 1) if total_possible > 0 else 0.0
+
+    # ── Today's team check-ins (always "right now", not range-scoped) ─────────
     checkins_today = 0
     if sub_ids:
         checkins_today = (await db.execute(
@@ -99,15 +117,17 @@ async def get_dashboard_kpis(user: "User", db: AsyncSession) -> dict:  # type: i
         )).scalar() or 0
 
     return {
-        # Legacy fields (kept for backwards compat)
-        "dealer_count": dealer_count,
-        "active_tasks": active_tasks,
+        # Legacy fields
+        "dealer_count":    dealer_count,
+        "active_tasks":    active_tasks,
         "pending_expenses": pending_expenses,
-        "team_size": team_size,
-        # Richer fields for dashboards
-        "total_tasks": total_tasks,
-        "completion_pct": completion_pct,
-        "travel_spend": travel_spend,
-        "pending_approvals": pending_approvals,
+        "team_size":       team_size,
+        # Period-scoped KPIs
+        "total_tasks":        total_tasks,
+        "completion_pct":     completion_pct,
+        "avg_attendance_pct": avg_attendance_pct,
+        "travel_spend":       travel_spend,
+        "pending_approvals":  pending_approvals,
+        # Always-current
         "checkins_today": checkins_today,
     }
