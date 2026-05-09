@@ -138,12 +138,14 @@ function JourneyTracker({ user, onJourneyAdded }) {
     const arrTime = format(new Date(endTime), 'HH:mm')
 
     await apiClient.post('/api/v1/expenses/', {
-      date:        format(new Date(st), 'yyyy-MM-dd'),
-      type:        'travel',
-      description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
+      date:          format(new Date(st), 'yyyy-MM-dd'),
+      type:          'travel',
+      description:   `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
       amount,
-      km:          parseFloat(Math.max(km, 0).toFixed(2)),
-      rate:        RATE_PER_KM,
+      km:            parseFloat(Math.max(km, 0).toFixed(2)),
+      rate:          RATE_PER_KM,
+      journey_start: new Date(st).toISOString(),
+      journey_end:   new Date(endTime).toISOString(),
     })
 
     addPendingJourney(data)

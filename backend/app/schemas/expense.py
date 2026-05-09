@@ -12,6 +12,8 @@ class ExpenseCreate(BaseModel):
     km: Decimal | None = None
     rate: Decimal | None = None
     bill_url: str | None = None
+    journey_start: datetime | None = None
+    journey_end:   datetime | None = None
 
 
 class ExpenseUpdate(BaseModel):
@@ -48,3 +50,5 @@ class TravelClaimOut(BaseModel):
     status: str
     approved_by: uuid.UUID | None
     created_at: datetime
+    journey_start: datetime | None = None
+    journey_end:   datetime | None = None

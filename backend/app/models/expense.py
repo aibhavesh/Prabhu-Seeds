@@ -21,6 +21,8 @@ class Expense(Base):
     status: Mapped[str] = mapped_column(String, default="pending")  # pending|approved|rejected
     approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     bill_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    journey_start: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    journey_end:   Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("NOW()"))
 
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])  # type: ignore[name-defined]

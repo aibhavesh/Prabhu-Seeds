@@ -76,6 +76,8 @@ async def list_travel_claims(
             status=e.status,
             approved_by=e.approved_by,
             created_at=e.created_at,
+            journey_start=e.journey_start,
+            journey_end=e.journey_end,
         )
         for e in expenses
     ]
@@ -158,9 +160,22 @@ async def get_travel_route(
     if not attendance or not attendance.waypoints:
         return []
 
-    # Return waypoints ordered by timestamp, filtering out (0,0) sentinels
-    waypoints = sorted(
+    # Filter out (0,0) sentinel fixes
+    all_wp = sorted(
         [w for w in attendance.waypoints if not (float(w.lat) == 0 and float(w.lng) == 0)],
         key=lambda w: w.timestamp,
     )
+
+    # If the expense carries journey time bounds, return only waypoints within
+    # that window so multiple journeys on the same day stay isolated.
+    if expense.journey_start and expense.journey_end:
+        # Allow a 5-minute buffer on each side to catch GPS fixes at departure/arrival
+        from datetime import timedelta
+        buf = timedelta(minutes=5)
+        window_start = expense.journey_start - buf
+        window_end   = expense.journey_end   + buf
+        waypoints = [w for w in all_wp if window_start <= w.timestamp <= window_end]
+    else:
+        waypoints = all_wp
+
     return waypoints
