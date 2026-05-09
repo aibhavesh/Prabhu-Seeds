@@ -124,53 +124,26 @@ function normalizeDepartments(rows) {
   }))
 }
 
-function normalizePerformers(rows) {
-  if (!Array.isArray(rows)) return []
-
-  return rows
-    .map((row, idx) => ({
-      id: row.id ?? row.user_id ?? `performer-${idx}`,
-      name: row.name ?? row.staff_name ?? row.user_name ?? 'Unknown',
-      department: row.department ?? row.dept ?? '--',
-      state: row.state ?? row.region ?? '--',
-      score: safeNumber(row.score ?? row.performance_score ?? row.completion_pct, 0),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 10)
-}
 
 function normalizeOwnerDashboard(payload) {
-  const summaryRaw = payload?.summary ?? payload?.kpis ?? {}
-  const states = normalizeStateMetrics(payload?.state_wise ?? payload?.states ?? payload?.map_data)
-  const departments = normalizeDepartments(payload?.department_performance ?? payload?.departments ?? payload?.teams)
-  const topPerformers = normalizePerformers(payload?.top_performers ?? payload?.leaderboard ?? payload?.performers)
+  if (!payload || typeof payload !== 'object') return null
+
+  // Backend returns a flat dict — fall back through summary/kpis wrappers to
+  // the payload itself so total_tasks / travel_spend etc. are always found.
+  const summaryRaw = payload?.summary ?? payload?.kpis ?? payload
+
+  const states       = normalizeStateMetrics(payload?.state_wise ?? payload?.states ?? payload?.map_data)
+  const departments  = normalizeDepartments(payload?.department_performance ?? payload?.departments ?? payload?.teams)
 
   const summary = {
-    totalTasks: safeNumber(summaryRaw.total_tasks ?? summaryRaw.totalTasks, 0),
-    completionPct: safeNumber(summaryRaw.completion_pct ?? summaryRaw.completionPct, 0),
+    totalTasks:       safeNumber(summaryRaw.total_tasks       ?? summaryRaw.totalTasks,       0),
+    completionPct:    safeNumber(summaryRaw.completion_pct    ?? summaryRaw.completionPct,    0),
     avgAttendancePct: safeNumber(summaryRaw.avg_attendance_pct ?? summaryRaw.avgAttendancePct, 0),
-    travelSpend: safeNumber(summaryRaw.travel_spend ?? summaryRaw.travelSpend, 0),
+    travelSpend:      safeNumber(summaryRaw.travel_spend      ?? summaryRaw.travelSpend,      0),
     pendingApprovals: safeNumber(summaryRaw.pending_approvals ?? summaryRaw.pendingApprovals, 0),
   }
 
-  const hasAnyData =
-    summary.totalTasks > 0 ||
-    summary.completionPct > 0 ||
-    summary.avgAttendancePct > 0 ||
-    summary.travelSpend > 0 ||
-    summary.pendingApprovals > 0 ||
-    states.length > 0 ||
-    departments.length > 0 ||
-    topPerformers.length > 0
-
-  if (!hasAnyData) return null
-
-  return {
-    summary,
-    states,
-    departments,
-    topPerformers,
-  }
+  return { summary, states, departments }
 }
 
 function buildMockOwnerDashboard() {
@@ -194,31 +167,19 @@ function buildMockOwnerDashboard() {
 
   return {
     summary: {
-      totalTasks: 1247,
-      completionPct: 78.4,
-      avgAttendancePct: 91.2,
-      travelSpend: 482350,
-      pendingApprovals: 23,
+      totalTasks: 0,
+      completionPct: 0,
+      avgAttendancePct: 0,
+      travelSpend: 0,
+      pendingApprovals: 0,
     },
     states,
     departments: [
-      { id: 'd1', department: 'Marketing', tasks: 88, attendance: 85, expenses: 122500 },
-      { id: 'd2', department: 'Production', tasks: 91, attendance: 89, expenses: 105200 },
-      { id: 'd3', department: 'R&D', tasks: 74, attendance: 81, expenses: 145900 },
-      { id: 'd4', department: 'Processing', tasks: 62, attendance: 77, expenses: 108400 },
-      { id: 'd5', department: 'Logistics', tasks: 81, attendance: 83, expenses: 132700 },
-    ],
-    topPerformers: [
-      { id: 'p1', name: 'Rajesh Kumar', department: 'Marketing', state: 'Madhya Pradesh', score: 96 },
-      { id: 'p2', name: 'Amit Sharma', department: 'Production', state: 'Rajasthan', score: 92 },
-      { id: 'p3', name: 'Priya Verma', department: 'R&D', state: 'Gujarat', score: 87 },
-      { id: 'p4', name: 'Neha Gupta', department: 'Processing', state: 'Uttar Pradesh', score: 85 },
-      { id: 'p5', name: 'Vikram Singh', department: 'Logistics', state: 'Maharashtra', score: 82 },
-      { id: 'p6', name: 'Sana Qureshi', department: 'Marketing', state: 'Punjab', score: 80 },
-      { id: 'p7', name: 'Kiran Reddy', department: 'Production', state: 'Telangana', score: 79 },
-      { id: 'p8', name: 'Anjali Das', department: 'R&D', state: 'West Bengal', score: 78 },
-      { id: 'p9', name: 'Rohit Patil', department: 'Logistics', state: 'Karnataka', score: 76 },
-      { id: 'p10', name: 'Meena Iyer', department: 'Processing', state: 'Tamil Nadu', score: 75 },
+      { id: 'd1', department: 'Marketing',   tasks: 88, attendance: 85, expenses: 122500 },
+      { id: 'd2', department: 'Production',  tasks: 91, attendance: 89, expenses: 105200 },
+      { id: 'd3', department: 'R&D',         tasks: 74, attendance: 81, expenses: 145900 },
+      { id: 'd4', department: 'Processing',  tasks: 62, attendance: 77, expenses: 108400 },
+      { id: 'd5', department: 'Logistics',   tasks: 81, attendance: 83, expenses: 132700 },
     ],
   }
 }
@@ -235,9 +196,8 @@ async function fetchOwnerDashboard({ fromDate, toDate }) {
     const mock = buildMockOwnerDashboard()
     return {
       ...real,
-      states:        real.states.length        ? real.states        : mock.states,
-      departments:   real.departments.length   ? real.departments   : mock.departments,
-      topPerformers: real.topPerformers.length ? real.topPerformers : mock.topPerformers,
+      states:      real.states.length      ? real.states      : mock.states,
+      departments: real.departments.length ? real.departments : mock.departments,
     }
   } catch {
     return buildMockOwnerDashboard()
@@ -566,49 +526,6 @@ export default function OwnerDashboardPage() {
               )}
             </section>
 
-            {(dashboardQuery.isLoading && !dashboardQuery.data) ? (
-              <ChartSkeleton className="min-h-[320px]" />
-            ) : (
-              <section className="bg-surface-container-lowest shadow-ghost overflow-hidden">
-                <div className="px-4 py-3 border-b border-outline-variant/20 flex items-center justify-between gap-2">
-                  <h2 className="text-lg font-black font-headline text-on-surface">Top 10 Performers</h2>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Leaderboard</span>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[760px] text-left">
-                    <thead className="bg-surface-container-high border-b border-outline-variant/20">
-                      <tr>
-                        <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Rank</th>
-                        <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Name</th>
-                        <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Department</th>
-                        <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">State</th>
-                        <th className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Score</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-outline-variant/10">
-                      {dashboard.topPerformers.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-sm text-on-surface-variant">
-                            No performers available for selected date range.
-                          </td>
-                        </tr>
-                      ) : (
-                        dashboard.topPerformers.map((row, idx) => (
-                          <tr key={row.id} className="hover:bg-surface-container-low/50">
-                            <td className="px-4 py-3 text-sm font-bold text-on-surface">{String(idx + 1).padStart(2, '0')}</td>
-                            <td className="px-4 py-3 text-sm font-semibold text-on-surface">{row.name}</td>
-                            <td className="px-4 py-3 text-sm text-on-surface-variant">{row.department}</td>
-                            <td className="px-4 py-3 text-sm text-on-surface-variant">{row.state}</td>
-                            <td className="px-4 py-3 text-sm font-bold text-primary">{row.score.toFixed(0)}%</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
       </div>
     </DashboardShell>
   )
