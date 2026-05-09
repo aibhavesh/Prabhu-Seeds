@@ -102,14 +102,37 @@ function Timeline({ updates }) {
   )
 }
 
+// ── Completed-journey sessionStorage helpers ───────────────────────────────────
+// Persists the completed-but-not-yet-saved journey so a page refresh between
+// "End Journey" and "Save Journey" doesn't silently discard the data.
+
+const COMPLETED_KEY = 'travel_journey_completed'
+
+function saveCompleted(data) {
+  try { sessionStorage.setItem(COMPLETED_KEY, JSON.stringify(data)) } catch { /* quota */ }
+}
+function loadCompleted() {
+  try {
+    const raw = sessionStorage.getItem(COMPLETED_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.startTime !== 'number' || typeof parsed?.totalKm !== 'number') return null
+    return parsed
+  } catch { return null }
+}
+function clearCompleted() {
+  try { sessionStorage.removeItem(COMPLETED_KEY) } catch { /* ignore */ }
+}
+
 // ── Journey Tracker ────────────────────────────────────────────────────────────
 
 function JourneyTracker({ user, onJourneyAdded }) {
   const queryClient = useQueryClient()
   const { active, startTime, totalKm, elapsed, gpsError, start, stop } = useTravelJourney()
 
-  // Completed journey waiting for "Save" action
-  const [completed, setCompleted] = useState(null)
+  // Completed journey waiting for "Save" action — restored from sessionStorage on
+  // mount so a page refresh between "End Journey" and "Save Journey" doesn't lose it.
+  const [completed, setCompleted] = useState(() => loadCompleted())
   const [saving, setSaving] = useState(false)
 
   // Pending journeys (accumulated, not yet printed)
@@ -128,7 +151,9 @@ function JourneyTracker({ user, onJourneyAdded }) {
     if (!startTime) return   // guard: can't stop a journey that never started
     const endTime = Date.now()
     stop()
-    setCompleted({ startTime, endTime, totalKm })
+    const data = { startTime, endTime, totalKm }
+    setCompleted(data)
+    saveCompleted(data)  // survive a page refresh before the user clicks Save
   }
 
   async function handleSave() {
@@ -157,6 +182,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
       queryClient.invalidateQueries({ queryKey: ['travel-history'] })
       onJourneyAdded?.()
 
+      clearCompleted()
       toast.success('Journey saved! It will be included in the next sheet print.')
       setCompleted(null)
     } catch (err) {
@@ -251,7 +277,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
             </button>
             <button
               type="button"
-              onClick={() => setCompleted(null)}
+              onClick={() => { clearCompleted(); setCompleted(null) }}
               className="px-4 py-2 bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-widest"
             >
               Discard
