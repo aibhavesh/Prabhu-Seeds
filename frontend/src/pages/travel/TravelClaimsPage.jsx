@@ -46,8 +46,10 @@ export default function TravelClaimsPage() {
   const role = user?.role?.toLowerCase()
   const canApprove = ['owner', 'manager', 'accounts'].includes(role)
 
-  const [fromDate, setFromDate] = useState(toIsoDate(new Date(new Date().setDate(1))))
-  const [toDate, setToDate] = useState(toIsoDate(new Date()))
+  // Default to no date filter — owner/manager should see all claims by default.
+  // A "first of month" default was silently hiding claims from previous months.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
   const [statusFilter, setStatusFilter] = useState('all')
