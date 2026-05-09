@@ -32,34 +32,49 @@ function useCreateUser() {
 // ── Add Member dialog ──────────────────────────────────────────────────────
 
 const schema = z.object({
-  name:     z.string().min(1, 'First name is required'),
-  surname:  z.string().min(1, 'Surname is required'),
-  mobile:   z.string().min(10, 'Enter a valid mobile number'),
-  email:    z.string().email('Enter a valid email').or(z.literal('')).optional(),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
-  role:     z.enum(['MANAGER', 'FIELD'], { required_error: 'Select a role' }),
+  name:       z.string().min(1, 'First name is required'),
+  surname:    z.string().min(1, 'Surname is required'),
+  mobile:     z.string().min(10, 'Enter a valid mobile number'),
+  email:      z.string().email('Enter a valid email').or(z.literal('')).optional(),
+  password:   z.string().min(6, 'Password must be at least 6 characters'),
+  role:       z.enum(['MANAGER', 'FIELD'], { required_error: 'Select a role' }),
+  manager_id: z.string().uuid('Select a valid manager').optional().nullable(),
+}).superRefine((val, ctx) => {
+  if (val.role === 'FIELD' && !val.manager_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Field staff must be assigned to a manager',
+      path: ['manager_id'],
+    })
+  }
 })
 
 function AddMemberDialog({ open, onOpenChange }) {
   const createUser = useCreateUser()
   const [showPassword, setShowPassword] = useState(false)
+  const { data: allUsers = [] } = useUsers()
+  const managers = allUsers.filter((u) => u.role === 'MANAGER' && u.is_active)
 
   const {
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isSubmitting },
-  } = useForm({ resolver: zodResolver(schema), defaultValues: { role: 'FIELD' } })
+  } = useForm({ resolver: zodResolver(schema), defaultValues: { role: 'FIELD', manager_id: '' } })
+
+  const selectedRole = watch('role')
 
   async function onSubmit(values) {
     try {
       await createUser.mutateAsync({
-        name:     values.name,
-        surname:  values.surname,
-        mobile:   values.mobile,
-        email:    values.email || null,
-        password: values.password,
-        role:     values.role,
+        name:       values.name,
+        surname:    values.surname,
+        mobile:     values.mobile,
+        email:      values.email || null,
+        password:   values.password,
+        role:       values.role,
+        manager_id: values.role === 'FIELD' ? (values.manager_id || null) : null,
       })
       toast.success(`${values.name} ${values.surname} added successfully`)
       reset()
@@ -198,6 +213,34 @@ function AddMemberDialog({ open, onOpenChange }) {
               </div>
               {errors.role && <p className="text-[10px] text-error mt-0.5">{errors.role.message}</p>}
             </div>
+
+            {/* Reports to Manager — only shown for FIELD role */}
+            {selectedRole === 'FIELD' && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">
+                  Reports to Manager <span className="text-error">*</span>
+                </label>
+                <select
+                  {...register('manager_id')}
+                  className="w-full bg-surface-container-low border-none px-3 py-2 text-sm focus:ring-1 focus:ring-primary outline-none text-on-surface"
+                >
+                  <option value="">— Select manager —</option>
+                  {managers.map((mgr) => (
+                    <option key={mgr.id} value={mgr.id}>
+                      {[mgr.name, mgr.surname].filter(Boolean).join(' ')}
+                    </option>
+                  ))}
+                </select>
+                {errors.manager_id && (
+                  <p className="text-[10px] text-error mt-0.5">{errors.manager_id.message}</p>
+                )}
+                {managers.length === 0 && (
+                  <p className="text-[10px] text-on-surface-variant mt-0.5">
+                    No active managers found — create a manager first.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex gap-3 pt-1">
