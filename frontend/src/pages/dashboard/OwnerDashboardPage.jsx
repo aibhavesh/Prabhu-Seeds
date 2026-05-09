@@ -472,6 +472,7 @@ export default function OwnerDashboardPage() {
                       key={item.label}
                       label={item.label}
                       value={item.value}
+                      trend={item.trend}
                       accent={item.accent}
                     />
                   ))}
