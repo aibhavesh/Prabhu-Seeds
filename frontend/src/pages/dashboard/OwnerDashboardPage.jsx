@@ -225,11 +225,20 @@ function buildMockOwnerDashboard() {
 
 async function fetchOwnerDashboard({ fromDate, toDate }) {
   try {
-    const response = await apiClient.get('/api/v1/dashboard/owner', {
+    const response = await apiClient.get('/api/v1/dashboard/', {
       params: { from: fromDate, to: toDate },
     })
-
-    return normalizeOwnerDashboard(response.data) ?? buildMockOwnerDashboard()
+    const real = normalizeOwnerDashboard(response.data)
+    if (!real) return buildMockOwnerDashboard()
+    // Keep mock state map + top-performers for visual richness until backend
+    // provides per-state aggregations. Real KPI summary always takes priority.
+    const mock = buildMockOwnerDashboard()
+    return {
+      ...real,
+      states:        real.states.length        ? real.states        : mock.states,
+      departments:   real.departments.length   ? real.departments   : mock.departments,
+      topPerformers: real.topPerformers.length ? real.topPerformers : mock.topPerformers,
+    }
   } catch {
     return buildMockOwnerDashboard()
   }
