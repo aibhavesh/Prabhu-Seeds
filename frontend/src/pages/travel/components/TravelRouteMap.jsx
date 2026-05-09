@@ -4,7 +4,9 @@ import { Map, useMap, useMapsLibrary, useApiLoadingStatus } from '@vis.gl/react-
 import GoogleMapProvider from '@/components/maps/GoogleMapProvider'
 import { useTravelRoute } from '../hooks/useTravel'
 
-const MIN_ROUTE_KM = 1
+// No minimum distance — show the map even for short journeys.
+// The 100 m GPS gate in useGpsWatcher means a single fix at the same
+// location is still meaningful to display; hiding it helps nobody.
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -293,15 +295,6 @@ export default function TravelRouteMap({ expenseId, heightClass = 'h-[420px]' })
       <NoRouteMessage
         heightClass={heightClass}
         reason="GPS waypoints were not recorded on this journey day."
-      />
-    )
-  }
-
-  if (distanceKm < MIN_ROUTE_KM) {
-    return (
-      <NoRouteMessage
-        heightClass={heightClass}
-        reason={`Total distance (${(distanceKm * 1000).toFixed(0)} m) is under 1 km — no meaningful route to display.`}
       />
     )
   }
