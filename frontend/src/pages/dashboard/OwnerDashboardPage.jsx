@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns'
+import { endOfMonth, format, startOfMonth } from 'date-fns'
 import generatePDF from 'react-to-pdf'
 import {
   Bar,
@@ -75,14 +75,6 @@ function getCurrentMonthRange() {
   }
 }
 
-function getPreviousRange(fromDate, toDate) {
-  const from = parseISO(fromDate)
-  const to = parseISO(toDate)
-  return {
-    fromDate: formatInputDate(subMonths(from, 1)),
-    toDate: formatInputDate(subMonths(to, 1)),
-  }
-}
 
 function resolveStateCode(row) {
   if (row?.state_code) return String(row.state_code).toUpperCase()
@@ -204,25 +196,6 @@ async function fetchOwnerDashboard({ fromDate, toDate }) {
   }
 }
 
-function calcTrend(current, previous, { invert = false } = {}) {
-  const curr = safeNumber(current)
-  const prev = safeNumber(previous)
-
-  if (curr === prev) {
-    return { direction: 'flat', deltaPct: 0, positive: true }
-  }
-
-  if (prev === 0) {
-    const positive = invert ? curr <= prev : curr >= prev
-    return { direction: curr > prev ? 'up' : 'down', deltaPct: 100, positive }
-  }
-
-  const deltaPct = Math.abs(((curr - prev) / prev) * 100)
-  const direction = curr > prev ? 'up' : 'down'
-  const positive = invert ? curr < prev : curr > prev
-
-  return { direction, deltaPct, positive }
-}
 
 function completionFill(completionPct) {
   const clamped = Math.max(0, Math.min(100, safeNumber(completionPct)))
@@ -230,18 +203,12 @@ function completionFill(completionPct) {
   return `hsl(133 48% ${lightness}%)`
 }
 
-function KpiCard({ label, value, trend, accent }) {
-  const trendIcon = trend.direction === 'up' ? 'north' : trend.direction === 'down' ? 'south' : 'remove'
-
+function KpiCard({ label, value, accent }) {
   return (
     <article className="bg-surface-container-lowest shadow-ghost px-4 py-4 relative overflow-hidden">
       <span className="absolute left-0 top-0 h-full w-1" style={{ backgroundColor: accent }} />
       <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{label}</p>
       <p className="text-3xl md:text-[2rem] font-black font-headline mt-1 text-on-surface">{value}</p>
-      <div className={`mt-2 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider ${trend.positive ? 'text-emerald-700' : 'text-error'}`}>
-        <span className="material-symbols-outlined text-[14px]" aria-hidden="true">{trendIcon}</span>
-        {trend.deltaPct.toFixed(1)}% vs last month
-      </div>
     </article>
   )
 }
@@ -357,57 +324,43 @@ export default function OwnerDashboardPage() {
 
   const dashboardRef = useRef(null)
 
-  const previousRange = useMemo(() => getPreviousRange(fromDate, toDate), [fromDate, toDate])
-
   const dashboardQuery = useQuery({
     queryKey: ['owner-dashboard', fromDate, toDate],
     queryFn: () => fetchOwnerDashboard({ fromDate, toDate }),
     placeholderData: (previous) => previous,
   })
 
-  const previousMonthQuery = useQuery({
-    queryKey: ['owner-dashboard', previousRange.fromDate, previousRange.toDate],
-    queryFn: () => fetchOwnerDashboard({ fromDate: previousRange.fromDate, toDate: previousRange.toDate }),
-    placeholderData: (previous) => previous,
-  })
-
   const dashboard = dashboardQuery.data ?? buildMockOwnerDashboard()
-  const previousSummary = previousMonthQuery.data?.summary ?? buildMockOwnerDashboard().summary
 
   const kpis = useMemo(
     () => [
       {
         label: 'Total Tasks',
         value: Math.round(dashboard.summary.totalTasks).toLocaleString('en-IN'),
-        trend: calcTrend(dashboard.summary.totalTasks, previousSummary.totalTasks),
         accent: '#2f8f3f',
       },
       {
         label: 'Completion %',
         value: `${dashboard.summary.completionPct.toFixed(1)}%`,
-        trend: calcTrend(dashboard.summary.completionPct, previousSummary.completionPct),
         accent: '#1b6f89',
       },
       {
         label: 'Avg Attendance %',
         value: `${dashboard.summary.avgAttendancePct.toFixed(1)}%`,
-        trend: calcTrend(dashboard.summary.avgAttendancePct, previousSummary.avgAttendancePct),
         accent: '#3b8e6a',
       },
       {
         label: 'Travel Spend',
         value: formatInr(dashboard.summary.travelSpend),
-        trend: calcTrend(dashboard.summary.travelSpend, previousSummary.travelSpend, { invert: true }),
         accent: '#8b5a1f',
       },
       {
-        label: 'Pending Approvals',
+        label: 'Pending Travel Approvals',
         value: String(Math.round(dashboard.summary.pendingApprovals)),
-        trend: calcTrend(dashboard.summary.pendingApprovals, previousSummary.pendingApprovals, { invert: true }),
         accent: '#7b4f16',
       },
     ],
-    [dashboard.summary, previousSummary]
+    [dashboard.summary]
   )
 
   function onFromDateChange(nextDate) {
@@ -478,7 +431,6 @@ export default function OwnerDashboardPage() {
                       key={item.label}
                       label={item.label}
                       value={item.value}
-                      trend={item.trend}
                       accent={item.accent}
                     />
                   ))}
