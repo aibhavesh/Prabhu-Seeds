@@ -4,6 +4,8 @@ import toast from 'react-hot-toast'
 import apiClient from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
+import { useDutyStore } from '@/store/dutyStore'
+import { useCheckIn } from '@/pages/attendance/hooks/useAttendance'
 import { useTravelHistory } from './hooks/useTravel'
 import useTravelJourney from './hooks/useTravelJourney'
 import {
@@ -114,11 +116,14 @@ function Timeline({ updates }) {
 function JourneyTracker({ user, onJourneyAdded }) {
   const queryClient = useQueryClient()
   const { active, startTime, totalKm, elapsed, gpsError, start, stop } = useTravelJourney()
+  const { checkedIn, checkIn: storeCheckIn } = useDutyStore()
+  const checkInMutation = useCheckIn()
 
   // `failed` holds journey data only when the auto-save on End Journey errored.
   // Normal flow: active → (End Journey) → saving → done (no intermediate state).
-  const [failed, setFailed]   = useState(null)
-  const [saving, setSaving]   = useState(false)
+  const [failed, setFailed]       = useState(null)
+  const [saving, setSaving]       = useState(false)
+  const [checkingIn, setCheckingIn] = useState(false)
 
   // Pending journeys (accumulated, not yet printed)
   const [pending, setPending] = useState(() => getPendingJourneys())
@@ -126,8 +131,45 @@ function JourneyTracker({ user, onJourneyAdded }) {
 
   const refreshPending = useCallback(() => setPending(getPendingJourneys()), [])
 
-  function handleStart() {
+  async function handleStart() {
     setFailed(null)
+
+    // ── Auto check-in if not already checked in ───────────────────────────────
+    if (!checkedIn) {
+      setCheckingIn(true)
+      try {
+        // Get current position first — check-in requires lat/lng
+        const pos = await new Promise((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15_000,
+          })
+        )
+        const { latitude: lat, longitude: lng } = pos.coords
+
+        // Check in with the backend
+        const record = await checkInMutation.mutateAsync({ lat, lng })
+
+        // Sync the duty store so FieldGpsTracker enables the watcher immediately
+        storeCheckIn(record.check_in ? new Date(record.check_in).getTime() : Date.now())
+
+        // Invalidate attendance-today so FieldGpsTracker picks up the new attendanceId
+        queryClient.invalidateQueries({ queryKey: ['attendance-today'] })
+
+        toast('You weren\'t checked in — we\'ve automatically checked you in for today. Journey is now starting!', {
+          icon: 'ℹ️',
+          duration: 5000,
+        })
+      } catch (err) {
+        const detail = err?.response?.data?.detail ?? err?.message ?? 'Location unavailable'
+        toast.error(`Auto check-in failed — ${detail}. Please check in manually first.`)
+        setCheckingIn(false)
+        return
+      } finally {
+        setCheckingIn(false)
+      }
+    }
+
     start()
     toast.success('Journey started — GPS is tracking.')
   }
@@ -345,15 +387,24 @@ function JourneyTracker({ user, onJourneyAdded }) {
             <p className="text-xs text-on-surface-variant mt-0.5">
               GPS tracks your distance. Each journey is added to the current sheet until you print.
             </p>
+            {!checkedIn && (
+              <p className="text-xs text-amber-600 font-semibold mt-1">
+                Not checked in — tapping Start will check you in automatically.
+              </p>
+            )}
             {gpsError && <p className="text-xs text-error font-semibold mt-1">{gpsError}</p>}
           </div>
           <button
             type="button"
             onClick={handleStart}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest"
+            disabled={checkingIn}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-60"
           >
-            <span className="material-symbols-outlined text-[16px]">play_arrow</span>
-            Start Journey
+            {checkingIn
+              ? <span className="h-3.5 w-3.5 rounded-full border-2 border-on-primary border-t-transparent animate-spin" />
+              : <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+            }
+            {checkingIn ? 'Checking in…' : 'Start Journey'}
           </button>
         </div>
       )}
