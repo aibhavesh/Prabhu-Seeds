@@ -138,34 +138,52 @@ function RoadRoute({ path, onFallback }) {
   useEffect(() => {
     if (!routesLib || !rendererRef.current || path.length < 2) return
 
-    const service = new routesLib.DirectionsService()
+    const service  = new routesLib.DirectionsService()
     const sampled  = smartSample(path, 25)
-
     const origin      = sampled[0]
     const destination = sampled[sampled.length - 1]
-    const waypoints   = sampled.slice(1, -1).map((p) => ({
+
+    function requestRoute(waypoints, onFailure) {
+      service.route(
+        {
+          origin,
+          destination,
+          waypoints,
+          travelMode: routesLib.TravelMode.DRIVING,
+          optimizeWaypoints: false,
+        },
+        (result, status) => {
+          if (status === 'OK') {
+            rendererRef.current?.setDirections(result)
+          } else {
+            onFailure(status)
+          }
+        },
+      )
+    }
+
+    const intermediates = sampled.slice(1, -1).map((p) => ({
       location: { lat: p.lat, lng: p.lng },
       stopover: false,
     }))
 
-    service.route(
-      {
-        origin,
-        destination,
-        waypoints,
-        travelMode: routesLib.TravelMode.DRIVING,
-        optimizeWaypoints: false,
-      },
-      (result, status) => {
-        if (status === 'OK') {
-          rendererRef.current?.setDirections(result)
-        } else {
-          // Directions API failed — tell parent to fall back to raw polyline
-          console.warn('DirectionsService failed:', status)
-          onFallback?.()
-        }
-      },
-    )
+    // First attempt: full sampled path with intermediate waypoints
+    requestRoute(intermediates, (status) => {
+      console.warn('DirectionsService failed with waypoints:', status)
+
+      if (intermediates.length === 0) {
+        // No waypoints to drop — give up and show raw polyline
+        onFallback?.()
+        return
+      }
+
+      // Second attempt: origin → destination only (no intermediates).
+      // Handles cases where an intermediate point is slightly off-road.
+      requestRoute([], (status2) => {
+        console.warn('DirectionsService failed origin→destination only:', status2)
+        onFallback?.()
+      })
+    })
   }, [routesLib, path, onFallback])
 
   return null
