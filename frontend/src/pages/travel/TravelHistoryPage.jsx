@@ -10,6 +10,7 @@ import {
   getPendingJourneys,
   addPendingJourney,
   printTravelPDF,
+  exportTravelExcel,
   RATE_PER_KM,
 } from '@/utils/travelSheet'
 import TravelShell from './components/TravelShell'
@@ -148,7 +149,8 @@ function JourneyTracker({ user, onJourneyAdded }) {
       journey_end:   new Date(endTime).toISOString(),
     })
 
-    addPendingJourney(data)
+    // Store the actual submitted amount so PDF/Excel use the same value
+    addPendingJourney({ ...data, amount })
     refreshPending()
     queryClient.invalidateQueries({ queryKey: ['travel-history'] })
     onJourneyAdded?.()
@@ -189,6 +191,8 @@ function JourneyTracker({ user, onJourneyAdded }) {
     }
   }
 
+  const [exporting, setExporting] = useState(false)
+
   async function handlePrint() {
     if (pending.length === 0) return
     setPrinting(true)
@@ -197,14 +201,28 @@ function JourneyTracker({ user, onJourneyAdded }) {
       refreshPending()
       toast.success('PDF downloaded! Future journeys will go to a new claim.')
     } catch (err) {
-      toast.error(err?.message ?? 'Failed to generate sheet.')
+      toast.error(err?.message ?? 'Failed to generate PDF.')
     } finally {
       setPrinting(false)
     }
   }
 
+  async function handleExcel() {
+    if (pending.length === 0) return
+    setExporting(true)
+    try {
+      await exportTravelExcel(user?.name)
+      refreshPending()
+      toast.success('Excel downloaded! Future journeys will go to a new claim.')
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to generate Excel.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const totalPendingKm  = pending.reduce((sum, j) => sum + j.totalKm, 0)
-  const totalPendingAmt = (totalPendingKm * RATE_PER_KM).toFixed(2)
+  const totalPendingAmt = pending.reduce((sum, j) => sum + (typeof j.amount === 'number' ? j.amount : j.totalKm * RATE_PER_KM), 0)
 
   return (
     <div className="space-y-3">
@@ -233,15 +251,26 @@ function JourneyTracker({ user, onJourneyAdded }) {
               ))}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handlePrint}
-            disabled={printing}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
-          >
-            <span className="material-symbols-outlined text-[16px]">print</span>
-            {printing ? 'Generating…' : 'Print PDF'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={printing || exporting}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+              {printing ? 'Generating…' : 'Download PDF'}
+            </button>
+            <button
+              type="button"
+              onClick={handleExcel}
+              disabled={exporting || printing}
+              className="flex items-center gap-2 px-4 py-2 bg-secondary text-on-secondary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[16px]">table_view</span>
+              {exporting ? 'Exporting…' : 'Download Excel'}
+            </button>
+          </div>
         </div>
       )}
 
