@@ -8,7 +8,7 @@
  */
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { format, isValid } from 'date-fns'
 
 const PENDING_KEY    = 'travel_pending_journeys'
@@ -244,17 +244,14 @@ export async function printTravelPDF(staffName) {
 
 // ── Excel generation (fills "TES Exp Format" sheet of the company template) ────
 //
-// Template structure (from travel-claim.xlsx, sheet index 2):
-//   Q5        — report date        (label at O5)
-//   C6        — staff name         (label at B6, merged C6:E6)
-//   Rows 11–41 — one journey per row:
-//     B = Departure DATE   C = Departure TIME
-//     E = Arrival DATE     F = Arrival TIME
-//     D, G, H, I, J       — blank (place/odometer — manual)
-//     K = Km               L = Rs. (km × 3.25)
-//     M,N,O,P,Q            — blank (bus/train, DA, other — not applicable)
-//     R = Total Amount     (= L since all other expense columns are blank)
-//   Row 42 — fixed total row (K42/L42/R42 — we write the sums)
+// Uses ExcelJS so the template is read and written byte-for-byte identically —
+// fonts, borders, merged cells, and all other formatting are untouched.
+// Only these cells are written:
+//   Q5          — report date
+//   C6          — staff name
+//   Rows 11–41  — B (dep date), C (dep time), E (arr date), F (arr time),
+//                 K (km), L (Rs = km×3.25), R (total amount)
+//   Row 42      — K/L/R totals
 
 export async function exportTravelExcel(staffName) {
   const journeys = getPendingJourneys()
@@ -262,74 +259,57 @@ export async function exportTravelExcel(staffName) {
 
   const { rows, totalKm, totalAmt } = journeyRows(journeys)
 
+  // Load the template as an ArrayBuffer
   const response    = await fetch(TEMPLATE_URL)
   const arrayBuffer = await response.arrayBuffer()
-  const wb          = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true })
 
-  // "TES Exp Format" is sheet index 2
-  const ws = wb.Sheets[wb.SheetNames[2]]
+  // ExcelJS reads the full OOXML structure — every style, font, border, merge
+  // is preserved exactly. Only cells we explicitly set() are changed.
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(arrayBuffer)
 
-  // Overwrite a cell's value while keeping its existing style and formatting
-  function writeCell(ref, value, type = 's') {
-    const existing = ws[ref] ?? {}
-    ws[ref] = { ...existing, t: type, v: value }
-    delete ws[ref].f  // drop formula — written value takes precedence
-    delete ws[ref].w  // drop cached display text so Excel re-renders
-  }
+  // "TES Exp Format" is the third sheet
+  const ws = wb.getWorksheet('TES Exp Format') ?? wb.worksheets[2]
 
-  // Blank out a cell without destroying its style
-  function clearCell(ref) {
-    if (!ws[ref]) return
-    ws[ref] = { ...ws[ref], t: 's', v: '', w: '' }
-    delete ws[ref].f
+  // Set a cell's value only — style is never touched
+  function write(ref, value) {
+    ws.getCell(ref).value = value
   }
 
   // ── Header ───────────────────────────────────────────────────────────────────
-  writeCell('Q5', format(new Date(), 'dd/MM/yyyy'))  // report date  (merged Q5:R5)
-  writeCell('C6', staffName ?? '')                   // staff name   (merged C6:E6)
+  write('Q5', format(new Date(), 'dd/MM/yyyy'))
+  write('C6', staffName ?? '')
 
-  // ── Clear all data columns in rows 11–41 ─────────────────────────────────────
-  // Only the columns we might touch — leaves the rest of the sheet untouched
-  const FILL_COLS = ['B','C','E','F','K','L','R']
-  for (let r = 11; r <= 41; r++) {
-    FILL_COLS.forEach((col) => clearCell(`${col}${r}`))
-  }
-
-  // ── Write one row per journey ─────────────────────────────────────────────────
+  // ── Data rows ────────────────────────────────────────────────────────────────
   rows.forEach(({ startDate, endDate, km, amt }, idx) => {
     const r = 11 + idx
-    if (r > 41) return  // template supports 31 data rows max (11–41)
+    if (r > 41) return
 
-    // Departure
-    writeCell(`B${r}`, isValid(startDate) ? format(startDate, 'dd/MM/yy') : '')
-    writeCell(`C${r}`, isValid(startDate) ? format(startDate, 'HH:mm')    : '')
-
-    // Arrival
-    writeCell(`E${r}`, isValid(endDate) ? format(endDate, 'dd/MM/yy') : '')
-    writeCell(`F${r}`, isValid(endDate) ? format(endDate, 'HH:mm')    : '')
-
-    // Details of Travel — km and cost only; D/G/H/I/J/M/N/O/P/Q stay blank
-    writeCell(`K${r}`, km,  'n')   // Km
-    writeCell(`L${r}`, amt, 'n')   // Rs. = km × 3.25
-    writeCell(`R${r}`, amt, 'n')   // Total Amount (= L; all other expense cols blank)
+    write(`B${r}`, isValid(startDate) ? format(startDate, 'dd/MM/yy') : '')
+    write(`C${r}`, isValid(startDate) ? format(startDate, 'HH:mm')    : '')
+    write(`E${r}`, isValid(endDate)   ? format(endDate,   'dd/MM/yy') : '')
+    write(`F${r}`, isValid(endDate)   ? format(endDate,   'HH:mm')    : '')
+    write(`K${r}`, parseFloat(km.toFixed(1)))
+    write(`L${r}`, parseFloat(amt.toFixed(2)))
+    write(`R${r}`, parseFloat(amt.toFixed(2)))
   })
 
-  // ── Fixed total row (row 42 in the template) ──────────────────────────────────
-  writeCell('K42', parseFloat(totalKm.toFixed(1)),  'n')
-  writeCell('L42', parseFloat(totalAmt.toFixed(2)), 'n')
-  writeCell('R42', parseFloat(totalAmt.toFixed(2)), 'n')
+  // ── Totals row (row 42 — fixed in template) ───────────────────────────────────
+  write('K42', parseFloat(totalKm.toFixed(1)))
+  write('L42', parseFloat(totalAmt.toFixed(2)))
+  write('R42', parseFloat(totalAmt.toFixed(2)))
 
   // ── Download ──────────────────────────────────────────────────────────────────
   const first = new Date(journeys[0].startTime)
   const name  = (staffName ?? 'staff').replace(/\s+/g, '-')
   const dt    = isValid(first) ? format(first, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')
 
-  const outBytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-  const blob     = new Blob([outBytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  const url      = URL.createObjectURL(blob)
-  const a        = document.createElement('a')
-  a.href         = url
-  a.download     = `travel-claim_${name}_${dt}.xlsx`
+  const buffer = await wb.xlsx.writeBuffer()
+  const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url    = URL.createObjectURL(blob)
+  const a      = document.createElement('a')
+  a.href       = url
+  a.download   = `travel-claim_${name}_${dt}.xlsx`
   a.click()
   URL.revokeObjectURL(url)
 

@@ -27,6 +27,7 @@
     "axios": "^1.14.0",
     "date-fns": "^4.1.0",
     "eslint-config-prettier": "^10.1.8",
+    "exceljs": "^4.4.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "prettier": "^3.8.1",
