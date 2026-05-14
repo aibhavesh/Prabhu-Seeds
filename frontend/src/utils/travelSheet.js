@@ -276,17 +276,17 @@ export async function exportTravelExcel(staffName) {
     ws.getCell(ref).value = value
   }
 
-  // ── Break shared-formula chains before writing ────────────────────────────────
-  // K11:K41 use =J-I, L11:L41 use =K*3.25, R11:R41 use =Q+O+N+L.
-  // Excel stores these as one master + clones. ExcelJS throws
-  // "Shared Formula master must exist above or left of clone" when the master
-  // cell is overwritten before all clones are resolved.
-  // Setting each cell to null replaces the formula with an empty value,
-  // breaking the chain cleanly — style/formatting is untouched.
+  // ── Break ALL shared-formula chains before writing ───────────────────────────
+  // The template stores formulas in K (=J-I), L (=K*3.25), R (=Q+O+N+L) as
+  // master+clone chains, and row 42 has SUM formulas across every column
+  // K through R. ExcelJS throws "Shared Formula master must exist above or
+  // left of clone" whenever any cell in a chain is written before all clones
+  // are resolved.
+  // Nulling every formula column (K–R) for all data + total rows breaks every
+  // chain at once without touching cell styles or formatting.
+  const FORMULA_COLS = ['K','L','M','N','O','P','Q','R']
   for (let r = 11; r <= 42; r++) {
-    ws.getCell(`K${r}`).value = null
-    ws.getCell(`L${r}`).value = null
-    ws.getCell(`R${r}`).value = null
+    FORMULA_COLS.forEach((col) => { ws.getCell(`${col}${r}`).value = null })
   }
 
   // ── Header ───────────────────────────────────────────────────────────────────
