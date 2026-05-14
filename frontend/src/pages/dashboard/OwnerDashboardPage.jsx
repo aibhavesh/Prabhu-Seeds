@@ -1,8 +1,7 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns'
-import generatePDF from 'react-to-pdf'
 import {
   Bar,
   BarChart,
@@ -349,8 +348,6 @@ export default function OwnerDashboardPage() {
   const [fromDate, setFromDate] = useState(monthDefaults.fromDate)
   const [toDate, setToDate] = useState(monthDefaults.toDate)
 
-  const dashboardRef = useRef(null)
-
   const previousRange = useMemo(() => getPreviousRange(fromDate, toDate), [fromDate, toDate])
 
   const dashboardQuery = useQuery({
@@ -420,14 +417,6 @@ export default function OwnerDashboardPage() {
     setToDate(nextDate)
   }
 
-  function handlePdfExport() {
-    generatePDF(dashboardRef, {
-      filename: `owner-board-report-${fromDate}-to-${toDate}.pdf`,
-      method: 'save',
-      page: { margin: 12, format: 'A4', orientation: 'landscape' },
-    })
-  }
-
   return (
     <DashboardShell
       topbar={
@@ -449,21 +438,13 @@ export default function OwnerDashboardPage() {
                 className="h-9 bg-surface-container-low border border-outline-variant/20 px-3 text-xs font-bold"
                 aria-label="To date"
               />
-              <button
-                type="button"
-                onClick={handlePdfExport}
-                className="h-9 px-3 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest inline-flex items-center gap-1"
-              >
-                <span className="material-symbols-outlined text-[15px]" aria-hidden="true">download</span>
-                Export PDF
-              </button>
               <NotificationBell />
             </div>
           }
         />
       }
     >
-      <div className="space-y-6" ref={dashboardRef}>
+      <div className="space-y-6">
             <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
               {(dashboardQuery.isLoading && !dashboardQuery.data)
                 ? Array.from({ length: 5 }).map((_, idx) => <KpiSkeleton key={idx} />)
