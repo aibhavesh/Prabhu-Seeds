@@ -276,6 +276,19 @@ export async function exportTravelExcel(staffName) {
     ws.getCell(ref).value = value
   }
 
+  // ── Break shared-formula chains before writing ────────────────────────────────
+  // K11:K41 use =J-I, L11:L41 use =K*3.25, R11:R41 use =Q+O+N+L.
+  // Excel stores these as one master + clones. ExcelJS throws
+  // "Shared Formula master must exist above or left of clone" when the master
+  // cell is overwritten before all clones are resolved.
+  // Setting each cell to null replaces the formula with an empty value,
+  // breaking the chain cleanly — style/formatting is untouched.
+  for (let r = 11; r <= 42; r++) {
+    ws.getCell(`K${r}`).value = null
+    ws.getCell(`L${r}`).value = null
+    ws.getCell(`R${r}`).value = null
+  }
+
   // ── Header ───────────────────────────────────────────────────────────────────
   write('Q5', format(new Date(), 'dd/MM/yyyy'))
   write('C6', staffName ?? '')
