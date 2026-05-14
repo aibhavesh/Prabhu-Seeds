@@ -242,7 +242,19 @@ export async function printTravelPDF(staffName) {
   doc.save(`travel-claim_${name}_${from}_to_${to}.pdf`)
 }
 
-// ── Excel generation (fills Sheet 3 of the company template) ──────────────────
+// ── Excel generation (fills "TES Exp Format" sheet of the company template) ────
+//
+// Template structure (from travel-claim.xlsx, sheet index 2):
+//   Q5        — report date        (label at O5)
+//   C6        — staff name         (label at B6, merged C6:E6)
+//   Rows 11–41 — one journey per row:
+//     B = Departure DATE   C = Departure TIME
+//     E = Arrival DATE     F = Arrival TIME
+//     D, G, H, I, J       — blank (place/odometer — manual)
+//     K = Km               L = Rs. (km × 3.25)
+//     M,N,O,P,Q            — blank (bus/train, DA, other — not applicable)
+//     R = Total Amount     (= L since all other expense columns are blank)
+//   Row 42 — fixed total row (K42/L42/R42 — we write the sums)
 
 export async function exportTravelExcel(staffName) {
   const journeys = getPendingJourneys()
@@ -250,66 +262,62 @@ export async function exportTravelExcel(staffName) {
 
   const { rows, totalKm, totalAmt } = journeyRows(journeys)
 
-  // Fetch and parse the company template so all formatting is preserved
   const response    = await fetch(TEMPLATE_URL)
   const arrayBuffer = await response.arrayBuffer()
   const wb          = XLSX.read(arrayBuffer, { type: 'array', cellStyles: true })
 
-  // Sheet 3 (index 2) is the travel claim form
-  const wsName = wb.SheetNames[2]
-  const ws     = wb.Sheets[wsName]
+  // "TES Exp Format" is sheet index 2
+  const ws = wb.Sheets[wb.SheetNames[2]]
 
-  // Helper — overwrites a cell's value while keeping its existing style
+  // Overwrite a cell's value while keeping its existing style and formatting
   function writeCell(ref, value, type = 's') {
     const existing = ws[ref] ?? {}
     ws[ref] = { ...existing, t: type, v: value }
-    delete ws[ref].f  // remove any formula so value takes precedence
-    delete ws[ref].w  // remove cached formatted text so Excel re-renders
+    delete ws[ref].f  // drop formula — written value takes precedence
+    delete ws[ref].w  // drop cached display text so Excel re-renders
   }
 
-  // ── Header fields ────────────────────────────────────────────────────────────
-  writeCell('P5', format(new Date(), 'dd/MM/yyyy'))  // Date
-  writeCell('C6', staffName ?? '')                   // Name (after the "Name" label at B6)
-
-  // ── Clear all placeholder values in data rows 11-40 ─────────────────────────
-  const DATA_COLS = ['B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R']
-  for (let r = 11; r <= 40; r++) {
-    DATA_COLS.forEach((col) => {
-      const ref = `${col}${r}`
-      if (ws[ref]) {
-        ws[ref] = { ...ws[ref], t: 's', v: '', w: '' }
-        delete ws[ref].f
-      }
-    })
+  // Blank out a cell without destroying its style
+  function clearCell(ref) {
+    if (!ws[ref]) return
+    ws[ref] = { ...ws[ref], t: 's', v: '', w: '' }
+    delete ws[ref].f
   }
 
-  // ── Write journey rows starting at row 11 ────────────────────────────────────
+  // ── Header ───────────────────────────────────────────────────────────────────
+  writeCell('Q5', format(new Date(), 'dd/MM/yyyy'))  // report date  (merged Q5:R5)
+  writeCell('C6', staffName ?? '')                   // staff name   (merged C6:E6)
+
+  // ── Clear all data columns in rows 11–41 ─────────────────────────────────────
+  // Only the columns we might touch — leaves the rest of the sheet untouched
+  const FILL_COLS = ['B','C','E','F','K','L','R']
+  for (let r = 11; r <= 41; r++) {
+    FILL_COLS.forEach((col) => clearCell(`${col}${r}`))
+  }
+
+  // ── Write one row per journey ─────────────────────────────────────────────────
   rows.forEach(({ startDate, endDate, km, amt }, idx) => {
     const r = 11 + idx
-    if (r > 40) return   // template has 30 data rows max
+    if (r > 41) return  // template supports 31 data rows max (11–41)
 
+    // Departure
     writeCell(`B${r}`, isValid(startDate) ? format(startDate, 'dd/MM/yy') : '')
     writeCell(`C${r}`, isValid(startDate) ? format(startDate, 'HH:mm')    : '')
-    // D = Departure Place  — left blank for manual entry
-    writeCell(`E${r}`, isValid(endDate)   ? format(endDate,   'dd/MM/yy') : '')
-    writeCell(`F${r}`, isValid(endDate)   ? format(endDate,   'HH:mm')    : '')
-    // G = Arrival Place    — left blank for manual entry
-    // H = Place of Stay    — left blank for manual entry
-    // I = Opp.             — left blank (odometer, manual)
-    // J = Closing          — left blank (odometer, manual)
-    writeCell(`K${r}`, km,  'n')   // Km  — actual tracked distance
-    writeCell(`L${r}`, amt, 'n')   // Rs. — actual travel cost
-    writeCell(`R${r}`, amt, 'n')   // Amount column (same as Rs. for motor travel)
+
+    // Arrival
+    writeCell(`E${r}`, isValid(endDate) ? format(endDate, 'dd/MM/yy') : '')
+    writeCell(`F${r}`, isValid(endDate) ? format(endDate, 'HH:mm')    : '')
+
+    // Details of Travel — km and cost only; D/G/H/I/J/M/N/O/P/Q stay blank
+    writeCell(`K${r}`, km,  'n')   // Km
+    writeCell(`L${r}`, amt, 'n')   // Rs. = km × 3.25
+    writeCell(`R${r}`, amt, 'n')   // Total Amount (= L; all other expense cols blank)
   })
 
-  // ── Total row — write below the last journey row ──────────────────────────────
-  const totalRow = 11 + rows.length
-  if (totalRow <= 41) {
-    writeCell(`J${totalRow}`, 'Total',        's')
-    writeCell(`K${totalRow}`, totalKm,        'n')
-    writeCell(`L${totalRow}`, totalAmt,       'n')
-    writeCell(`R${totalRow}`, totalAmt,       'n')
-  }
+  // ── Fixed total row (row 42 in the template) ──────────────────────────────────
+  writeCell('K42', parseFloat(totalKm.toFixed(1)),  'n')
+  writeCell('L42', parseFloat(totalAmt.toFixed(2)), 'n')
+  writeCell('R42', parseFloat(totalAmt.toFixed(2)), 'n')
 
   // ── Download ──────────────────────────────────────────────────────────────────
   const first = new Date(journeys[0].startTime)
