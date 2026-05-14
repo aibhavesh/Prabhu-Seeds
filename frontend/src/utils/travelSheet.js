@@ -304,13 +304,11 @@ export async function exportTravelExcel(staffName) {
     write(`F${r}`, isValid(endDate)   ? format(endDate,   'HH:mm')    : '')
     write(`K${r}`, parseFloat(km.toFixed(1)))
     write(`L${r}`, parseFloat(amt.toFixed(2)))
-    write(`R${r}`, parseFloat(amt.toFixed(2)))
   })
 
   // ── Totals row (row 42 — fixed in template) ───────────────────────────────────
   write('K42', parseFloat(totalKm.toFixed(1)))
   write('L42', parseFloat(totalAmt.toFixed(2)))
-  write('R42', parseFloat(totalAmt.toFixed(2)))
 
   // ── Download ──────────────────────────────────────────────────────────────────
   const first = new Date(journeys[0].startTime)
