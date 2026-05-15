@@ -11,7 +11,12 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     MAINTENANCE_MODE: bool = False
 
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://prabhuseeds.com",
+        "https://www.prabhuseeds.com",
+    ]
 
     DATABASE_URL: str
     # Direct (non-pooler) URL used only for Alembic migrations.
