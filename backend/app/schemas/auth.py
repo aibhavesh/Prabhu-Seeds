@@ -34,14 +34,18 @@ class LoginRequest(BaseModel):
 # ── Mobile app (OTP-based) ─────────────────────────────────────────────────
 class OTPSendRequest(BaseModel):
     mobile: str
-    password: str
 
     @field_validator("mobile")
     @classmethod
     def validate_mobile(cls, v: str) -> str:
         return _clean_mobile(v)
 
-    @field_validator("password")
+
+class OTPVerifyRequest(BaseModel):
+    mobile: str
+    otp: str
+
+    @field_validator("mobile")
     @classmethod
     def validate_mobile(cls, v: str) -> str:
         return _clean_mobile(v)

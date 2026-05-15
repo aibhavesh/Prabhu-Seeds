@@ -52,7 +52,7 @@ async def verify_otp(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
     try:
-        result = await auth_service.login(body.mobile, body.password, db)
+        result = await auth_service.verify_and_login(body.mobile, body.otp, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     if not result["success"]:

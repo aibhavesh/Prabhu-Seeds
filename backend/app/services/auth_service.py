@@ -7,19 +7,7 @@ import bcrypt as _bcrypt
 
 from app.core.config import settings
 from app.models.user import User
-
-
-def hash_password(password: str) -> str:
-    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt(12)).decode()
-
-
-def verify_password(plain: str, hashed: str | None) -> bool:
-    if not hashed:
-        return False
-    try:
-        return _bcrypt.checkpw(plain.encode(), hashed.encode())
-    except Exception:
-        return False
+from app.integrations.msg91 import send_otp, verify_otp
 
 
 # ── Password helpers (web app) ─────────────────────────────────────────────
