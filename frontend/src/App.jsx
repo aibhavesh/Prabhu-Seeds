@@ -10,7 +10,6 @@ import { useGpsWatcher } from '@/hooks/useGpsWatcher'
 import { useMyTodayAttendance } from '@/pages/attendance/hooks/useAttendance'
 
 import MobileInputPage        from '@/pages/auth/MobileInputPage'
-import OTPVerifyPage           from '@/pages/auth/OTPVerifyPage'
 import OwnerDashboardPage      from '@/pages/dashboard/OwnerDashboardPage'
 import ManagerDashboardPage    from '@/pages/dashboard/ManagerDashboardPage'
 import FieldStaffDashboardPage from '@/pages/dashboard/FieldStaffDashboardPage'
@@ -58,7 +57,7 @@ const router = createBrowserRouter([
   // ── Public ──────────────────────────────────────────────────────────────
   { path: '/',              element: <Navigate to="/login" replace /> },
   { path: '/login',         element: <MobileInputPage /> },
-  { path: '/auth/verify',   element: <OTPVerifyPage /> },
+  { path: '/auth/verify',   element: <Navigate to="/login" replace /> },
 
   // ── /dashboard → redirect to role-specific dashboard ────────────────────
   { path: '/dashboard',     loader: dashboardRedirectLoader, element: <></> },

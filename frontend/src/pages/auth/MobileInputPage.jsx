@@ -2,29 +2,37 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import apiClient from '@/lib/axios'
+import { useAuthStore } from '@/store/authStore'
+import { getDashboardRoute } from '@/lib/navConfig'
 
 export default function MobileInputPage() {
   const [mobile, setMobile] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const setAuth = useAuthStore((s) => s.setAuth)
 
-  const isValid = mobile.length === 10
+  const isValid = mobile.length === 10 && password.length >= 6
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!isValid) return
+    if (!isValid || loading) return
 
+    setLoading(true)
     try {
-      await toast.promise(
-        apiClient.post('/api/v1/auth/send-otp', { mobile: `+91${mobile}` }),
-        {
-          loading: 'Sending OTP…',
-          success: 'OTP sent!',
-          error: (err) => err.response?.data?.detail ?? err.response?.data?.message ?? 'Failed to send OTP',
-        }
-      )
-      navigate('/auth/verify', { state: { mobile } })
-    } catch {
-      // toast.promise already rendered the error toast
+      const { data } = await apiClient.post('/api/v1/auth/login', {
+        mobile: `+91${mobile}`,
+        password,
+      })
+      setAuth(data.user, data.token)
+      toast.success(`Welcome, ${data.user.name}!`)
+      navigate(getDashboardRoute(data.user.role), { replace: true })
+    } catch (err) {
+      const detail = err.response?.data?.detail ?? err.response?.data?.message ?? 'Login failed'
+      toast.error(detail)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -37,7 +45,8 @@ export default function MobileInputPage() {
         </div>
 
         <div className="bg-surface-container-lowest p-6 border border-outline-variant/15 shadow-ghost rounded-sm">
-          <form onSubmit={handleSubmit} noValidate className="space-y-6">
+          <form onSubmit={handleSubmit} noValidate className="space-y-5">
+            {/* Mobile */}
             <div className="space-y-2">
               <label
                 htmlFor="mobile"
@@ -45,7 +54,6 @@ export default function MobileInputPage() {
               >
                 Mobile Number
               </label>
-
               <div className="flex items-stretch rounded-sm overflow-hidden border border-outline-variant/30 focus-within:border-primary transition-colors">
                 <span className="flex items-center px-4 bg-surface-container-low text-on-surface-variant font-semibold text-sm border-r border-outline-variant/30 select-none">
                   +91
@@ -63,19 +71,52 @@ export default function MobileInputPage() {
                   autoFocus
                 />
               </div>
+            </div>
 
-              <p className="text-[11px] text-on-surface-variant/70 italic">
-                An OTP will be sent to this number for verification.
-              </p>
+            {/* Password */}
+            <div className="space-y-2">
+              <label
+                htmlFor="password"
+                className="block text-[14px] font-bold text-on-surface uppercase tracking-wider"
+              >
+                Password
+              </label>
+              <div className="flex items-stretch rounded-sm overflow-hidden border border-outline-variant/30 focus-within:border-primary transition-colors">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="w-full px-4 py-3 bg-transparent text-on-surface placeholder:text-on-surface-variant/50 focus:ring-0 border-none text-sm font-medium"
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="flex items-center px-3 bg-surface-container-low text-on-surface-variant border-l border-outline-variant/30 hover:text-primary transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  <span className="material-symbols-outlined text-[20px]">
+                    {showPassword ? 'visibility_off' : 'visibility'}
+                  </span>
+                </button>
+              </div>
             </div>
 
             <button
               type="submit"
-              disabled={!isValid}
+              disabled={!isValid || loading}
               className="w-full h-10 bg-gradient-to-r from-primary to-primary-container text-on-primary font-bold text-sm rounded-sm shadow-sm hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
             >
-              Send OTP
-              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
+              {loading ? (
+                <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
+              ) : (
+                <>
+                  Login
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_forward</span>
+                </>
+              )}
             </button>
           </form>
         </div>
