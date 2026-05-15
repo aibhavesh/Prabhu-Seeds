@@ -1,0 +1,29 @@
+# Local development infrastructure only — Postgres + Redis
+# The app (FastAPI + React) runs locally with hot-reload, NOT in Docker.
+# Use:  setup.bat  (first time)
+#       start.bat  (every time after)
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: pgauser
+      POSTGRES_PASSWORD: pgapassword
+      POSTGRES_DB: prabhu_seeds
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgauser -d prabhu_seeds"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata_dev:
