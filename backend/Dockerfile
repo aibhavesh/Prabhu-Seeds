@@ -5,7 +5,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
 # Runtime stage
@@ -16,7 +16,7 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-COPY . .
+COPY backend/ .
 
 EXPOSE 8000
 
