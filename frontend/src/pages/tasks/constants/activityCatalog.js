@@ -1,11 +1,11 @@
 /**
- * Activity catalog — mirrors the Backend Task Assignment Form spec.
+ * Activity catalog — mirrors the Backend Task Assignment Form spec exactly.
  * Each entry defines the activity name, its metric unit, and whether
  * a Location field is required (Production & R&D Pre-Season activities).
  */
 
 export const DEPARTMENTS = ['Marketing', 'Production', 'R&D']
-export const SEASONS = ['Pre-Season', 'Post-Season']
+export const SEASONS = ['Pre-Season', 'Post-Season', 'Always Active']
 
 export const ACTIVITY_CATALOG = {
   Marketing: {
@@ -13,7 +13,7 @@ export const ACTIVITY_CATALOG = {
       { name: 'Pre Season Farmer Meeting', unit: 'NOS' },
       { name: 'Individual Farmer Contact', unit: 'NOS' },
       { name: 'Postering', unit: 'DAYS' },
-      { name: 'Jeep / Rikshaw / Bike Campaign', unit: 'DAYS' },
+      { name: 'Jeep / Rikshwa / Bike Campaign', unit: 'DAYS' },
       { name: 'Mega Farmer Meeting', unit: 'NOS' },
       { name: 'New Product Demo / Dealer Visit', unit: 'NOS' },
     ],
@@ -25,6 +25,12 @@ export const ACTIVITY_CATALOG = {
       { name: 'Live Plant Display / Trail Product', unit: 'NOS' },
       { name: 'Testimonial / Yield Data', unit: 'NOS/QUINTALS' },
       { name: 'Shop / Wall / Trolly Painting', unit: 'DAYS' },
+    ],
+    'Always Active': [
+      { name: 'Complaint Handling', unit: 'NOS' },
+      { name: 'Marketing Staff Meeting', unit: 'NOS' },
+      { name: 'Field Staff Meeting', unit: 'NOS' },
+      { name: 'Other Campaign / Krishi Mela', unit: 'NOS' },
     ],
   },
   Production: {
@@ -39,6 +45,12 @@ export const ACTIVITY_CATALOG = {
       { name: 'De-Tasseling / Crossing / Caping', unit: 'NOS/ACRES' },
       { name: 'Harvesting / Transport / Storage', unit: 'NOS/QUINTALS' },
       { name: 'Seed Available Details for Payment', unit: 'NOS' },
+    ],
+    'Always Active': [
+      { name: 'Complaint Handling', unit: 'NOS' },
+      { name: 'Marketing Staff Meeting', unit: 'NOS' },
+      { name: 'Field Staff Meeting', unit: 'NOS' },
+      { name: 'Other Campaign / Krishi Mela', unit: 'NOS' },
     ],
   },
   'R&D': {
@@ -56,16 +68,40 @@ export const ACTIVITY_CATALOG = {
       { name: 'Storage', unit: 'NOS/QUINTALS' },
       { name: 'GOT (No. of Products)', unit: 'NOS' },
     ],
+    'Always Active': [
+      { name: 'Complaint Handling', unit: 'NOS' },
+      { name: 'Marketing Staff Meeting', unit: 'NOS' },
+      { name: 'Field Staff Meeting', unit: 'NOS' },
+      { name: 'Other Campaign / Krishi Mela', unit: 'NOS' },
+    ],
   },
 }
 
-/** Returns the list of activities for a given dept+season, or []. */
+/** Returns the list of activities for a given dept+season, or [].
+ *  - Pre-Season  → only Pre-Season activities
+ *  - Post-Season → only Post-Season activities
+ *  - Always Active → all activities across Pre-Season + Post-Season + Always Active
+ */
 export function getActivities(dept, season) {
-  return ACTIVITY_CATALOG[dept]?.[season] ?? []
+  if (!dept || !season) return []
+  const catalog = ACTIVITY_CATALOG[dept]
+  if (!catalog) return []
+  if (season === 'Always Active') {
+    // Show the full department list: Pre-Season + Post-Season + Always Active
+    return [
+      ...(catalog['Pre-Season'] ?? []),
+      ...(catalog['Post-Season'] ?? []),
+      ...(catalog['Always Active'] ?? []),
+    ]
+  }
+  return catalog[season] ?? []
 }
 
-/** Returns the activity definition object by name within a dept+season. */
+/** Returns the activity definition object by name within a dept+season.
+ *  Searches the merged list so requiresLocation is always found correctly.
+ */
 export function getActivity(dept, season, name) {
+  if (!name) return null
   return getActivities(dept, season).find((a) => a.name === name) ?? null
 }
 

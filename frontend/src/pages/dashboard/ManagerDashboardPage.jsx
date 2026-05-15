@@ -1,14 +1,24 @@
 import { useMemo } from 'react'
-import { format, getDaysInMonth, startOfMonth } from 'date-fns'
+import { endOfMonth, format, getDaysInMonth, startOfMonth } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
 import NotificationBell from '@/features/notifications/NotificationBell'
 import { useAuthStore } from '@/store/authStore'
+import apiClient from '@/lib/axios'
 import { usePendingLeaveRequests, useReviewLeaveRequest } from '@/pages/leave/hooks/useLeaves'
 import { useAttendanceReport } from '@/pages/attendance/hooks/useAttendance'
 import { useTasks, useFieldStaff } from '@/pages/tasks/hooks/useTasks'
 import { useTravelClaims } from '@/pages/travel/hooks/useTravel'
+
+function useDashboardKpis() {
+  return useQuery({
+    queryKey: ['dashboard-kpis'],
+    queryFn: () => apiClient.get('/api/v1/dashboard/').then((r) => r.data),
+    staleTime: 60_000,
+  })
+}
 
 const WEEK_DAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 
@@ -45,6 +55,9 @@ export default function ManagerDashboardPage() {
 
   const currentMonth = format(new Date(), 'yyyy-MM')
   const todayStr = format(new Date(), 'yyyy-MM-dd')
+  // Date range for current month travel claims (backend uses from_date/to_date, not month)
+  const monthFromDate = format(startOfMonth(new Date()), 'yyyy-MM-dd')
+  const monthToDate   = format(endOfMonth(new Date()), 'yyyy-MM-dd')
 
   // ── Real data queries ─────────────────────────────────────────────────────
   const pendingLeavesQuery = usePendingLeaveRequests()
@@ -52,7 +65,9 @@ export default function ManagerDashboardPage() {
   const attendanceReportQuery = useAttendanceReport({ month: currentMonth, date: todayStr })
   const tasksQuery = useTasks({})
   const fieldStaffQuery = useFieldStaff()
-  const travelQuery = useTravelClaims({ month: currentMonth })
+  const travelQuery = useTravelClaims({ fromDate: monthFromDate, toDate: monthToDate })
+  // Real team check-in count from the dashboard KPI endpoint
+  const dashboardKpisQuery = useDashboardKpis()
 
   // ── KPI computations ──────────────────────────────────────────────────────
   const tasks = tasksQuery.data?.tasks ?? []
@@ -103,12 +118,9 @@ export default function ManagerDashboardPage() {
     return cells
   }, [attendanceReportQuery.data, currentMonth])
 
-  const presentToday = safeNumber(attendanceReportQuery.data?.summary?.present_today ?? attendanceReportQuery.data?.present_today)
-  const teamSize = fieldStaff.length || safeNumber(attendanceReportQuery.data?.summary?.team_size)
-
-  // ── Check-in counts ───────────────────────────────────────────────────────
-  const checkInsCompleted = presentToday || teamSize
-  const checkInsTotal = teamSize
+  // Use real team check-in data from the dashboard KPI endpoint
+  const checkInsCompleted = safeNumber(dashboardKpisQuery.data?.checkins_today)
+  const checkInsTotal     = safeNumber(dashboardKpisQuery.data?.team_size ?? fieldStaff.length)
 
   // ── Team rows (field staff + their task counts) ────────────────────────────
   const teamRows = useMemo(() => {

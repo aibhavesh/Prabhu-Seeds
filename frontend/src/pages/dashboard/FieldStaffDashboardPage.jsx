@@ -1,89 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { format, parseISO, isPast } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import DashboardShell, { DashboardTopbar } from '@/components/layout/DashboardShell'
-import apiClient from '@/lib/axios'
 import { useAuthStore } from '@/store/authStore'
 import { useDutyStore } from '@/store/dutyStore'
 import { useTasks } from '@/pages/tasks/hooks/useTasks'
 import { useCheckIn, useCheckOut, useMyMonthlyReport, useMyTodayAttendance } from '@/pages/attendance/hooks/useAttendance'
 import { useTravelHistory } from '@/pages/travel/hooks/useTravel'
-import { useGpsWatcher } from '@/hooks/useGpsWatcher'
-
-function buildMockFieldData() {
-  return {
-    kpis: {
-      tasksToday: 3,
-      travelPay: 8450,
-      attendanceDays: 22,
-      attendanceTotal: 24,
-    },
-    weather: {
-      location: 'Karnal, HR',
-      temperature: 32,
-      summary: 'Clear skies. Optimal for field visits and crop inspection.',
-    },
-    gps: {
-      lat: 28.6139,
-      lng: 77.209,
-    },
-    itinerary: [
-      {
-        id: 'it-1',
-        type: 'Crop Audit',
-        title: 'Dealer Stock Verification & Quality Check',
-        place: 'Village: Brahman Majra / Area: Karnal North',
-        status: 'pending',
-        action: 'Start Task',
-      },
-      {
-        id: 'it-2',
-        type: 'Field Visit',
-        title: 'Demonstration Plot - Hybrid Maize 404',
-        place: 'Village: Nilokheri / Area: Karnal Central',
-        status: 'in_progress',
-        action: 'Resume',
-      },
-      {
-        id: 'it-3',
-        type: 'Payment',
-        title: 'Dealer Payment Collection - Amit Agritech',
-        place: 'Village: Taroari / Area: Karnal South',
-        status: 'scheduled',
-        action: 'Details',
-      },
-    ],
-    precisionNote:
-      'Soil moisture levels in Nilokheri sector are currently 12% below the seasonal average. Prioritize inspection of Maize 404 hybrid plots for water stress indicators during today\'s visit.',
-  }
-}
-
-function normalizeFieldData(payload) {
-  if (!payload || typeof payload !== 'object') return null
-
-  return {
-    ...buildMockFieldData(),
-    ...payload,
-    kpis: {
-      ...buildMockFieldData().kpis,
-      ...(payload.kpis ?? payload.summary ?? {}),
-    },
-    itinerary: Array.isArray(payload.itinerary) && payload.itinerary.length
-      ? payload.itinerary
-      : buildMockFieldData().itinerary,
-  }
-}
-
-async function fetchFieldDashboard() {
-  try {
-    const response = await apiClient.get('/api/v1/dashboard/field')
-    return normalizeFieldData(response.data) ?? buildMockFieldData()
-  } catch {
-    return buildMockFieldData()
-  }
-}
 
 // Maps backend task status to display label + pill colour
 const STATUS_META = {
@@ -122,19 +46,10 @@ export default function FieldStaffDashboardPage() {
   const { data: travelData } = useTravelHistory({ month: currentMonth })
   const { data: todayAttendance, isSuccess: todayLoaded } = useMyTodayAttendance()
 
-  // Continuously track position while on duty — posts a waypoint every 100 m or 5 min
-  useGpsWatcher({ attendanceId: todayAttendance?.id ?? null, enabled: checkedIn })
-
   // Initialise from persisted start time so navigation doesn't reset the clock
   const [elapsedSeconds, setElapsedSeconds] = useState(() =>
     dutyStartedAt ? Math.floor((Date.now() - dutyStartedAt) / 1000) : 0
   )
-
-  const dashboardQuery = useQuery({
-    queryKey: ['field-dashboard'],
-    queryFn: fetchFieldDashboard,
-    placeholderData: (prev) => prev,
-  })
 
   // Fetch real tasks for this field user
   const { data: tasksData, isLoading: tasksLoading } = useTasks({})
@@ -146,8 +61,6 @@ export default function FieldStaffDashboardPage() {
       .filter((t) => t.status !== 'completed')
       .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9))
   }, [tasksData])
-
-  const dashboard = dashboardQuery.data ?? buildMockFieldData()
 
   useEffect(() => {
     if (!checkedIn || !dutyStartedAt) return undefined
@@ -286,16 +199,12 @@ export default function FieldStaffDashboardPage() {
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-on-surface-variant">Operational Overview</p>
             <h1 className="text-4xl font-black font-headline">Field Dashboard</h1>
           </div>
-
           <div className="text-right">
             <p className="text-sm font-medium text-on-surface-variant">{format(new Date(), 'EEEE, dd MMM yyyy')}</p>
-            <p className="text-xs font-mono text-outline">
-              GPS: {dashboard.gps.lat.toFixed(4)}\u00b0 N, {dashboard.gps.lng.toFixed(4)}\u00b0 E
-            </p>
           </div>
         </section>
 
-        <section className="grid grid-cols-1 xl:grid-cols-[1.3fr_0.7fr] gap-3">
+        <section className="grid grid-cols-1 gap-3">
           <article className="bg-surface-container-lowest border-l-4 border-primary px-4 py-5 flex items-center justify-between gap-4 flex-wrap">
             <div>
               <h2 className="text-2xl font-black font-headline inline-flex items-center gap-2">
@@ -326,15 +235,6 @@ export default function FieldStaffDashboardPage() {
             </button>
           </article>
 
-          <article className="bg-surface-container-lowest p-4 relative overflow-hidden">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-on-surface-variant">Weather: {dashboard.weather.location}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <span className="material-symbols-outlined text-4xl text-tertiary" aria-hidden="true">wb_sunny</span>
-              <span className="text-5xl font-black font-headline">{dashboard.weather.temperature}\u00b0C</span>
-            </div>
-            <p className="text-sm text-on-surface-variant mt-2">{dashboard.weather.summary}</p>
-            <span className="material-symbols-outlined absolute -right-5 -bottom-5 text-[130px] opacity-10" aria-hidden="true">agriculture</span>
-          </article>
         </section>
 
         <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -459,40 +359,32 @@ export default function FieldStaffDashboardPage() {
           )}
         </section>
 
-        <section className="grid grid-cols-1 xl:grid-cols-[1fr_1fr] gap-3">
-          <article className="bg-surface-container-lowest p-4">
-            <h3 className="text-2xl font-black font-headline mb-3">Month Summary</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-surface-container-low px-3 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Present Days</p>
-                <p className="text-3xl font-black font-headline mt-1">{monthlyReport?.present ?? '—'}</p>
-              </div>
-              <div className="bg-surface-container-low px-3 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Tasks Completed</p>
-                <p className="text-3xl font-black font-headline mt-1">
-                  {tasksLoading ? '…' : (tasksData?.tasks ?? []).filter(t => t.status === 'completed').length}
-                </p>
-              </div>
-              <div className="bg-surface-container-low px-3 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">KM Travelled</p>
-                <p className="text-3xl font-black font-headline mt-1">
-                  {monthlyReport == null ? '—' : `${Number(monthlyReport.km_total ?? 0).toFixed(1)}`}
-                </p>
-              </div>
-              <div className="bg-surface-container-low px-3 py-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Pending Tasks</p>
-                <p className="text-3xl font-black font-headline mt-1">
-                  {tasksLoading ? '…' : activeTasks.filter(t => t.status === 'assigned').length}
-                </p>
-              </div>
+        <section className="bg-surface-container-lowest p-4">
+          <h3 className="text-2xl font-black font-headline mb-3">Month Summary</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-surface-container-low px-3 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Present Days</p>
+              <p className="text-3xl font-black font-headline mt-1">{monthlyReport?.present ?? '—'}</p>
             </div>
-          </article>
-
-          <article className="bg-surface-container-lowest p-4">
-            <h3 className="text-2xl font-black font-headline">Precision Note</h3>
-            <p className="text-sm text-on-surface-variant mt-3 leading-6">{dashboard.precisionNote}</p>
-            <div className="mt-5 pt-3 border-t border-outline-variant/20 text-[10px] uppercase tracking-wider font-bold text-on-surface-variant">HQ Alert</div>
-          </article>
+            <div className="bg-surface-container-low px-3 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Tasks Completed</p>
+              <p className="text-3xl font-black font-headline mt-1">
+                {tasksLoading ? '…' : (tasksData?.tasks ?? []).filter(t => t.status === 'completed').length}
+              </p>
+            </div>
+            <div className="bg-surface-container-low px-3 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">KM Travelled</p>
+              <p className="text-3xl font-black font-headline mt-1">
+                {monthlyReport == null ? '—' : `${Number(monthlyReport.km_total ?? 0).toFixed(1)}`}
+              </p>
+            </div>
+            <div className="bg-surface-container-low px-3 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Pending Tasks</p>
+              <p className="text-3xl font-black font-headline mt-1">
+                {tasksLoading ? '…' : activeTasks.filter(t => t.status === 'assigned').length}
+              </p>
+            </div>
+          </div>
         </section>
       </div>
     </DashboardShell>

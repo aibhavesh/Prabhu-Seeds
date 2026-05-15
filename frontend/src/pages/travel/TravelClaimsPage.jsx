@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as AlertDialog from '@radix-ui/react-alert-dialog'
 import { format } from 'date-fns'
-import generatePDF from 'react-to-pdf'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import TravelRouteMap from './components/TravelRouteMap'
 import toast from 'react-hot-toast'
 import { useTravelClaims, useApproveTravelClaim, useRejectTravelClaim } from './hooks/useTravel'
@@ -43,10 +44,13 @@ function formatMoney(value) {
 
 export default function TravelClaimsPage() {
   const user = useAuthStore((s) => s.user)
-  const isAccounts = ['ACCOUNTS', 'OWNER', 'accounts', 'owner'].includes(user?.role)
+  const role = user?.role?.toLowerCase()
+  const canApprove = ['owner', 'manager', 'accounts'].includes(role)
 
-  const [fromDate, setFromDate] = useState(toIsoDate(new Date(new Date().setDate(1))))
-  const [toDate, setToDate] = useState(toIsoDate(new Date()))
+  // Default to no date filter — owner/manager should see all claims by default.
+  // A "first of month" default was silently hiding claims from previous months.
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
   const [statusFilter, setStatusFilter] = useState('all')
@@ -57,22 +61,15 @@ export default function TravelClaimsPage() {
   const approveMutation = useApproveTravelClaim()
   const rejectMutation = useRejectTravelClaim()
 
-  const pdfRef = useRef(null)
-
   const { data, isLoading, isError } = useTravelClaims({
     fromDate,
     toDate,
-    page,
-    pageSize,
-    department: selectedDepartment,
+    statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
   })
 
   const rawClaims = useMemo(() => normalizeClaims(data), [data])
-
-  const claims = useMemo(() => {
-    if (statusFilter === 'all') return rawClaims
-    return rawClaims.filter((claim) => claim.status === statusFilter)
-  }, [rawClaims, statusFilter])
+  // Status filtering is now done server-side; rawClaims is already filtered
+  const claims = rawClaims
 
   const summary = {
     pendingInr: sumAmount(claims, 'pending'),
@@ -96,36 +93,54 @@ export default function TravelClaimsPage() {
     total: data?.total ?? claims.length,
   }
 
-  function handleCsvExport() {
-    const header = ['Staff Name', 'Date', 'Distance (KM)', 'PPK Rate', 'Amount (INR)', 'Status']
-    const lines = claims.map((claim) => [
-      claim.staffName,
-      claim.date ? format(new Date(claim.date), 'dd MMM yyyy') : '--',
-      claim.distanceKm.toFixed(1),
-      claim.ppkRate.toFixed(2),
-      claim.amountInr.toFixed(2),
-      claim.status,
-    ])
-
-    const csvContent = [header, ...lines]
-      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','))
-      .join('\n')
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `travel-claims-${fromDate}-to-${toDate}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
   function handlePdfExport() {
-    generatePDF(pdfRef, {
-      filename: `travel-claims-${fromDate}-to-${toDate}.pdf`,
-      method: 'save',
-      page: { margin: 16, format: 'A4', orientation: 'landscape' },
+    const last20 = [...claims]
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 20)
+
+    if (last20.length === 0) {
+      toast.error('No claims to export.')
+      return
+    }
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+    const pageW = doc.internal.pageSize.getWidth()
+    const margin = 12
+
+    // Header
+    doc.setFontSize(13)
+    doc.setFont('helvetica', 'bold')
+    doc.text('PRABHUGOPAL AGRI PRODUCT PVT LTD', pageW / 2, margin + 6, { align: 'center' })
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Travel Claims Report — Last 20 Claims', pageW / 2, margin + 12, { align: 'center' })
+    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy')}`, pageW - margin, margin + 12, { align: 'right' })
+
+    autoTable(doc, {
+      startY: margin + 18,
+      head: [['#', 'Staff Name', 'Date', 'Distance (km)', 'Rate (₹/km)', 'Amount (₹)', 'Status']],
+      body: last20.map((claim, idx) => [
+        idx + 1,
+        claim.staffName,
+        claim.date ? format(new Date(claim.date), 'dd MMM yyyy') : '--',
+        claim.distanceKm.toFixed(1),
+        claim.ppkRate.toFixed(2),
+        claim.amountInr.toLocaleString('en-IN'),
+        claim.status.charAt(0).toUpperCase() + claim.status.slice(1),
+      ]),
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [47, 143, 63], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        3: { halign: 'right' },
+        4: { halign: 'right' },
+        5: { halign: 'right', fontStyle: 'bold' },
+        6: { halign: 'center' },
+      },
     })
+
+    doc.save(`travel-claims-last20-${format(new Date(), 'yyyy-MM-dd')}.pdf`)
   }
 
   function openDecision(claimId, decision) {
@@ -152,27 +167,19 @@ export default function TravelClaimsPage() {
       title="Travel Claims"
       subtitle="Review and manage field staff reimbursement requests."
       rightSlot={
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleCsvExport}
-            className="px-3 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest"
-          >
-            Export CSV
-          </button>
-          <button
-            type="button"
-            onClick={handlePdfExport}
-            className="px-3 py-2 bg-surface-container-low text-on-surface text-xs font-bold uppercase tracking-widest"
-          >
-            Export PDF
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handlePdfExport}
+          className="flex items-center gap-1.5 px-3 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest"
+        >
+          <span className="material-symbols-outlined text-[15px]">picture_as_pdf</span>
+          Export PDF
+        </button>
       }
     >
-      {!isAccounts && (
+      {!canApprove && (
         <div className="bg-error/10 text-error px-4 py-3 text-sm font-semibold">
-          This screen is intended for Accounts role.
+          You do not have permission to approve or reject travel claims.
         </div>
       )}
 
@@ -237,7 +244,7 @@ export default function TravelClaimsPage() {
 
       {!isLoading && data && (
         <>
-          <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4" ref={pdfRef}>
+          <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             <article className="bg-surface-container-lowest shadow-ghost px-5 py-4 relative">
               <span className="absolute left-0 top-0 h-full w-1 bg-primary" />
               <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Total Pending INR</p>

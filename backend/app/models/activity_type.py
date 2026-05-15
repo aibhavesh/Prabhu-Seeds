@@ -11,7 +11,8 @@ class ActivityType(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     department: Mapped[str] = mapped_column(String, nullable=False)  # Marketing|Production|R&D|Processing
-    season: Mapped[str | None] = mapped_column(String, nullable=True)  # Pre-season|Post-season|Always
-    fields_schema: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # dynamic field definitions
+    season: Mapped[str | None] = mapped_column(String, nullable=True)  # Pre-Season|Post-Season|Always Active
+    activity_number: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 27-53 per spec
+    fields_schema: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("NOW()"))

@@ -21,6 +21,52 @@ DEPT_LABEL = {
 router = APIRouter()
 
 
+@router.get("/{attendance_id}/route")
+async def get_route(
+    attendance_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """
+    Return a road-snapped polyline for an attendance record's GPS journey.
+    Fetches raw waypoints, applies RDP simplification, calls Google Directions API.
+    Falls back to raw waypoints if the API is unavailable.
+    Owner sees any record; Manager sees only their subordinates' records.
+    """
+    from sqlalchemy.orm import selectinload
+    from app.models.attendance import GpsWaypoint
+    from app.services import maps_service
+
+    if current_user.role not in ("OWNER", "MANAGER"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    result = await db.execute(
+        select(Attendance).options(selectinload(Attendance.user))
+        .where(Attendance.id == attendance_id)
+    )
+    att = result.scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance record not found")
+
+    if current_user.role == "MANAGER":
+        if str(att.user.manager_id) != str(current_user.id):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    wp_result = await db.execute(
+        select(GpsWaypoint)
+        .where(GpsWaypoint.attendance_id == attendance_id)
+        .order_by(GpsWaypoint.timestamp.asc())
+    )
+    wps = wp_result.scalars().all()
+    waypoints = [
+        {"lat": float(w.lat), "lng": float(w.lng)}
+        for w in wps
+        if float(w.lat) != 0 and float(w.lng) != 0
+    ]
+
+    return await maps_service.get_route_polyline(waypoints, redis=None)
+
+
 @router.get("/{attendance_id}/waypoints", response_model=list[WaypointOut])
 async def get_waypoints(
     attendance_id: int,
@@ -103,6 +149,69 @@ async def add_waypoint(
         return await attendance_service.add_waypoint(body, db)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+
+@router.get("/team/monthly", response_model=list[TeamAttendanceOut])
+async def team_monthly(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    month: str | None = None,   # "YYYY-MM" — defaults to current month
+    skip: int = 0,
+    limit: int = 500,
+) -> list:
+    """
+    Return all field staff attendance records for an entire month.
+    Owner sees everyone; manager sees only their direct subordinates.
+    Records are ordered by date desc, then check_in asc.
+    """
+    import calendar as _cal
+
+    today = _date.today()
+    try:
+        y, m = (int(month[:4]), int(month[5:7])) if month else (today.year, today.month)
+    except (ValueError, AttributeError, TypeError):
+        y, m = today.year, today.month
+
+    month_start = _date(y, m, 1)
+    month_end   = _date(y, m, _cal.monthrange(y, m)[1])
+
+    if current_user.role not in ("OWNER", "MANAGER"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    stmt = (
+        select(Attendance, User)
+        .join(User, Attendance.user_id == User.id)
+        .where(
+            Attendance.date >= month_start,
+            Attendance.date <= month_end,
+            User.role.in_(["FIELD", "MANAGER"]),
+            User.is_active.is_(True),
+        )
+        .order_by(Attendance.date.desc(), Attendance.check_in.asc().nulls_last())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    if current_user.role == "MANAGER":
+        stmt = stmt.where(User.manager_id == current_user.id)
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    return [
+        TeamAttendanceOut(
+            id=att.id,
+            user_id=att.user_id,
+            name=user.name,
+            department=DEPT_LABEL.get(user.role, user.role.title()),
+            date=att.date,
+            check_in=att.check_in,
+            check_out=att.check_out,
+            km=att.km,
+            status=att.status,
+        )
+        for att, user in rows
+    ]
 
 
 @router.get("/team", response_model=list[TeamAttendanceOut])

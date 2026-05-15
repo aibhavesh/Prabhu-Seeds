@@ -9,6 +9,7 @@ import { useFieldStaff, useCreateTask } from '../hooks/useTasks'
 import {
   DEPARTMENTS,
   SEASONS,
+  ACTIVITY_CATALOG,
   INDIAN_STATES,
   getActivities,
   getActivity,
@@ -267,16 +268,21 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
                 </div>
               </Field>
 
-              {dept && (
+            {dept && (
                 <Field label="Season" htmlFor="season" required error={errors.season?.message}>
-                  <div className="mt-1">
+                  <div className="mt-1 flex flex-wrap gap-1">
                     <SegmentedControl
                       options={SEASONS}
                       value={season}
                       onChange={(v) => setValue('season', v, { shouldValidate: true })}
                     />
-                    <input type="hidden" {...register('season')} />
+                    {season === 'Always Active' && (
+                      <span className="self-center ml-2 px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-wider rounded">
+                        No season restriction
+                      </span>
+                    )}
                   </div>
+                  <input type="hidden" {...register('season')} />
                 </Field>
               )}
             </section>
@@ -291,9 +297,30 @@ export default function CreateTaskDialog({ open, onOpenChange }) {
                 <Field label="Activity Plan" htmlFor="activity_type" required error={errors.activity_type?.message}>
                   <select id="activity_type" {...register('activity_type')} className={inputCls}>
                     <option value="">Select activity…</option>
-                    {activities.map((a) => (
-                      <option key={a.name} value={a.name}>{a.name}</option>
-                    ))}
+                    {season === 'Always Active' ? (
+                      // Group by season when showing the full department list
+                      <>
+                        <optgroup label="── Pre-Season ──">
+                          {(ACTIVITY_CATALOG[dept]?.['Pre-Season'] ?? []).map((a) => (
+                            <option key={`pre-${a.name}`} value={a.name}>{a.name}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="── Post-Season ──">
+                          {(ACTIVITY_CATALOG[dept]?.['Post-Season'] ?? []).map((a) => (
+                            <option key={`post-${a.name}`} value={a.name}>{a.name}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="── Always Active ──">
+                          {(ACTIVITY_CATALOG[dept]?.['Always Active'] ?? []).map((a) => (
+                            <option key={`always-${a.name}`} value={a.name}>{a.name}</option>
+                          ))}
+                        </optgroup>
+                      </>
+                    ) : (
+                      activities.map((a) => (
+                        <option key={a.name} value={a.name}>{a.name}</option>
+                      ))
+                    )}
                   </select>
                 </Field>
 

@@ -11,6 +11,7 @@ from app.models.activity_type import ActivityType
 from app.models.notification import Notification
 from app.models.audit_log import AuditLog
 from app.models.user_consent import UserConsent
+from app.models.feedback import ActivityAttribute, FarmerFeedback, FarmerFeedbackResponse, ActivityMedia
 
 __all__ = [
     "User",
@@ -26,4 +27,8 @@ __all__ = [
     "Notification",
     "AuditLog",
     "UserConsent",
+    "ActivityAttribute",
+    "FarmerFeedback",
+    "FarmerFeedbackResponse",
+    "ActivityMedia",
 ]

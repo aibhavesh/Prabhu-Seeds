@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth, users, districts, dealers, products, orders, tasks,
     attendance, expenses, leaves, dashboard,
-    maps, analytics, notifications, activity_types, travel, tracking,
+    maps, analytics, notifications, activity_types, travel, tracking, feedback,
 )
 
 api_router = APIRouter()
@@ -24,3 +24,4 @@ api_router.include_router(maps.router, prefix="/maps", tags=["Maps"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
 api_router.include_router(activity_types.router, prefix="/activity-types", tags=["Activity Types"])
+api_router.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])

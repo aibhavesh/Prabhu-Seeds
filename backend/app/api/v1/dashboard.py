@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,5 +15,9 @@ router = APIRouter()
 async def get_dashboard(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: date | None = None,
+    to_date: date | None = None,
 ) -> dict:
-    return await dashboard_service.get_dashboard_kpis(current_user, db)
+    return await dashboard_service.get_dashboard_kpis(
+        current_user, db, from_date=from_date, to_date=to_date
+    )

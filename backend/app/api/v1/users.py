@@ -9,22 +9,32 @@ from app.core.dependencies import get_current_user, require_roles
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserOut
 from app.services import user_service
+from app.services.visibility import get_subordinate_ids
 
 router = APIRouter()
 
 
 @router.get("/field-workload", response_model=list[dict])
 async def field_users_workload(
-    _: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
+    current_user: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list:
     """
-    Returns all active FIELD users with their current active task count.
-    Used by the task creation form to show workload status per agent.
+    Returns active FIELD users with their current active task count.
+    OWNER sees all field agents; MANAGER sees only their subordinates.
     """
-    from sqlalchemy import func, case
+    from sqlalchemy import func
     from app.models.task import Task, TaskMember
-    from app.schemas.user import UserOut
+
+    # Determine which FIELD users are visible to this caller
+    field_q = select(User).where(User.role == "FIELD", User.is_active.is_(True))
+    if current_user.role == "MANAGER":
+        sub_ids = await get_subordinate_ids(current_user.id, db)
+        field_q = field_q.where(User.id.in_(sub_ids))
+    field_q = field_q.order_by(User.name)
+
+    result = await db.execute(field_q)
+    users = result.scalars().all()
 
     # Count active (non-completed, non-cancelled) tasks per user
     # via direct assignment OR group membership
@@ -42,12 +52,6 @@ async def field_users_workload(
         .subquery()
     )
 
-    result = await db.execute(
-        select(User).where(User.role == "FIELD", User.is_active.is_(True)).order_by(User.name)
-    )
-    users = result.scalars().all()
-
-    # Fetch counts in bulk
     sc_result = await db.execute(select(singular_counts))
     sc_map = {str(row.user_id): row.cnt for row in sc_result.fetchall()}
 
@@ -69,13 +73,27 @@ async def field_users_workload(
 
 @router.get("/", response_model=list[UserOut])
 async def list_users(
-    _: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
+    current_user: Annotated[User, Depends(require_roles("OWNER", "MANAGER"))],
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
     role: str | None = Query(default=None, description="Filter by role, e.g. FIELD, MANAGER"),
 ) -> list[User]:
-    return await user_service.list_users(db, skip=skip, limit=limit, role=role)
+    """
+    List users.
+    OWNER sees all non-OWNER users.
+    MANAGER sees only their direct and indirect subordinates.
+    """
+    if current_user.role == "MANAGER":
+        sub_ids = await get_subordinate_ids(current_user.id, db)
+        visible_ids = [current_user.id, *sub_ids]
+        return await user_service.list_users(db, skip=skip, limit=limit, role=role, visible_ids=visible_ids)
+    else:
+        # OWNER — exclude other OWNER accounts from team view
+        return await user_service.list_users(
+            db, skip=skip, limit=limit, role=role,
+            exclude_role="OWNER" if role is None else None,
+        )
 
 
 @router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)

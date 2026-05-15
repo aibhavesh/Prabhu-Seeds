@@ -8,6 +8,51 @@ from app.integrations.google_maps import haversine_km
 CACHE_TTL = 3600  # 1 hour
 
 
+# ── Ramer-Douglas-Peucker polyline simplification ─────────────────────────────
+
+def _point_line_distance(point: dict, start: dict, end: dict) -> float:
+    x0, y0 = point['lat'], point['lng']
+    x1, y1 = start['lat'], start['lng']
+    x2, y2 = end['lat'], end['lng']
+    dx, dy = x2 - x1, y2 - y1
+    if dx == 0 and dy == 0:
+        return math.sqrt((x0 - x1) ** 2 + (y0 - y1) ** 2)
+    t = max(0.0, min(1.0, ((x0 - x1) * dx + (y0 - y1) * dy) / (dx * dx + dy * dy)))
+    return math.sqrt((x0 - x1 - t * dx) ** 2 + (y0 - y1 - t * dy) ** 2)
+
+
+def _rdp_simplify(points: list[dict], epsilon: float) -> list[dict]:
+    if len(points) < 3:
+        return points
+    max_dist, max_idx = 0.0, 0
+    for i in range(1, len(points) - 1):
+        d = _point_line_distance(points[i], points[0], points[-1])
+        if d > max_dist:
+            max_dist, max_idx = d, i
+    if max_dist > epsilon:
+        left = _rdp_simplify(points[:max_idx + 1], epsilon)
+        right = _rdp_simplify(points[max_idx:], epsilon)
+        return left[:-1] + right
+    return [points[0], points[-1]]
+
+
+def _smart_sample(points: list[dict], max_points: int = 25) -> list[dict]:
+    """Binary-search RDP epsilon to produce at most max_points waypoints."""
+    if len(points) <= max_points:
+        return points
+    lo, hi = 0.0, 1.0
+    best = [points[0], points[-1]]
+    for _ in range(24):
+        mid = (lo + hi) / 2
+        simplified = _rdp_simplify(points, mid)
+        if len(simplified) <= max_points:
+            best = simplified
+            hi = mid
+        else:
+            lo = mid
+    return best
+
+
 def _polyline_decode(encoded: str) -> list[dict]:
     """Decode a Google Maps encoded polyline string to list of {lat, lng}."""
     coords = []
@@ -103,6 +148,63 @@ async def geocode_address(address: str, redis=None) -> dict:
         "lng": loc["lng"],
         "formatted_address": data["results"][0]["formatted_address"],
     }
+
+    if redis:
+        await redis.setex(cache_key, CACHE_TTL, json.dumps(result))
+    return result
+
+
+async def get_route_polyline(waypoints: list[dict], redis=None) -> dict:
+    """
+    Return a road-snapped polyline for a list of {lat, lng} waypoints.
+    Uses Google Maps Directions API with RDP-simplified intermediate waypoints.
+    Falls back to raw waypoints if API key is missing or call fails.
+    """
+    if len(waypoints) < 2:
+        return {"polyline": waypoints, "waypoint_count": len(waypoints)}
+
+    sampled = _smart_sample(waypoints, max_points=25)
+    origin = sampled[0]
+    destination = sampled[-1]
+    intermediates = sampled[1:-1]
+
+    cache_key = (
+        f"route:{origin['lat']:.4f},{origin['lng']:.4f}"
+        f":{destination['lat']:.4f},{destination['lng']:.4f}"
+        f":{len(intermediates)}"
+    )
+    if redis:
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+
+    if not settings.GOOGLE_MAPS_API_KEY:
+        result = {"polyline": waypoints, "waypoint_count": len(waypoints)}
+        return result
+
+    url = "https://maps.googleapis.com/maps/api/directions/json"
+    params: dict = {
+        "origin": f"{origin['lat']},{origin['lng']}",
+        "destination": f"{destination['lat']},{destination['lng']}",
+        "mode": "driving",
+        "key": settings.GOOGLE_MAPS_API_KEY,
+    }
+    if intermediates:
+        params["waypoints"] = "|".join(f"via:{p['lat']},{p['lng']}" for p in intermediates)
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, params=params)
+        data = resp.json()
+        if data.get("status") == "OK" and data.get("routes"):
+            encoded = data["routes"][0]["overview_polyline"]["points"]
+            result = {"polyline": _polyline_decode(encoded), "waypoint_count": len(waypoints)}
+        else:
+            logger.warning(f"Directions API status={data.get('status')} — using raw waypoints")
+            result = {"polyline": waypoints, "waypoint_count": len(waypoints)}
+    except Exception as exc:
+        logger.error(f"Directions API error: {exc}")
+        result = {"polyline": waypoints, "waypoint_count": len(waypoints)}
 
     if redis:
         await redis.setex(cache_key, CACHE_TTL, json.dumps(result))

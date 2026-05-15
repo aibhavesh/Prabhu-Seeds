@@ -1,16 +1,19 @@
 /**
- * Travel claim PDF generator.
- * Replicates the Excel template layout including the company logo.
+ * Travel claim PDF + Excel generator.
+ * Replicates the company template layout (Sheet 3 of travel-claim.xlsx).
  *
  * Pending journeys are stored in localStorage under PENDING_KEY.
- * printTravelPDF() generates the PDF, downloads it, then clears the list.
+ * printTravelPDF() / exportTravelExcel() generate the file, download it,
+ * then clear the pending list.
  */
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import ExcelJS from 'exceljs'
 import { format, isValid } from 'date-fns'
 
 const PENDING_KEY    = 'travel_pending_journeys'
 const LOGO_URL       = '/templates/travel-logo.png'
+const TEMPLATE_URL   = '/templates/travel-claim.xlsx'
 export const RATE_PER_KM = 3.25
 
 // ── Pending journey storage ────────────────────────────────────────────────────
@@ -48,6 +51,26 @@ export function clearPendingJourneys() {
   try { localStorage.removeItem(PENDING_KEY) } catch { /* ignore */ }
 }
 
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+
+function journeyRows(journeys) {
+  let totalKm = 0, totalAmt = 0
+  const rows = journeys.map((j) => {
+    const startDate = new Date(j.startTime)
+    const endDate   = new Date(j.endTime)
+    const km        = parseFloat(Math.max(0, j.totalKm).toFixed(1))
+    // Use the amount that was actually submitted to the backend if stored,
+    // otherwise re-derive it from km × rate.
+    const amt       = typeof j.amount === 'number'
+      ? j.amount
+      : parseFloat((km * RATE_PER_KM).toFixed(2))
+    totalKm  += km
+    totalAmt += amt
+    return { startDate, endDate, km, amt }
+  })
+  return { rows, totalKm, totalAmt }
+}
+
 // ── Image → base64 ─────────────────────────────────────────────────────────────
 
 async function fetchImageBase64(url) {
@@ -73,19 +96,20 @@ export async function printTravelPDF(staffName) {
   if (journeys.length === 0) throw new Error('No journeys queued for printing yet.')
 
   const logoBase64 = await fetchImageBase64(LOGO_URL)
+  const { rows, totalKm, totalAmt } = journeyRows(journeys)
 
   const doc    = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   const pageW  = doc.internal.pageSize.getWidth()   // 297
   const margin = 10
 
-  // ── Logo (top-left, columns A–B in Excel, rows 2–4) ─────────────────────────
+  // ── Logo ────────────────────────────────────────────────────────────────────
   let headerEndY = margin
   if (logoBase64) {
     doc.addImage(logoBase64, 'PNG', margin, margin, 47, 21)
     headerEndY = margin + 21
   }
 
-  // ── Company name & title (centred) ──────────────────────────────────────────
+  // ── Company name & title ────────────────────────────────────────────────────
   doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
   doc.text('PRABHUGOPAL AGRI PRODUCT PVT LTD', pageW / 2, margin + 7, { align: 'center' })
@@ -116,44 +140,35 @@ export async function printTravelPDF(staffName) {
     [
       'Date', 'Time', 'Place',
       'Date', 'Time', 'Place',
-      // Place of Stay is rowSpan above
+      // Place of Stay spans from above
       'Opp.', 'Closing', 'Km',
-      // Rs. is rowSpan above
+      // Rs. spans from above
     ],
   ]
 
-  let totalKm  = 0
-  let totalAmt = 0
+  const body = rows.map(({ startDate, endDate, km, amt }) => [
+    isValid(startDate) ? format(startDate, 'dd/MM/yy') : '',
+    isValid(startDate) ? format(startDate, 'HH:mm')    : '',
+    '', // Place — user fills manually
+    isValid(endDate)   ? format(endDate,   'dd/MM/yy') : '',
+    isValid(endDate)   ? format(endDate,   'HH:mm')    : '',
+    '', // Place — user fills manually
+    '', // Place of stay — user fills manually
+    '', // Opp.    — left blank (odometer entry is manual)
+    '', // Closing — left blank (odometer entry is manual)
+    km.toFixed(1),        // Km  — actual km tracked by GPS
+    `₹${amt.toFixed(2)}`, // Rs. — actual amount submitted
+  ])
 
-  const body = journeys.map((j) => {
-    const startDate = new Date(j.startTime)
-    const endDate   = new Date(j.endTime)
-    const km        = parseFloat(Math.max(0, j.totalKm).toFixed(1))
-    const amt       = parseFloat((km * RATE_PER_KM).toFixed(2))
-    totalKm  += km
-    totalAmt += amt
-
-    return [
-      isValid(startDate) ? format(startDate, 'dd/MM/yy') : '',
-      isValid(startDate) ? format(startDate, 'HH:mm') : '',
-      '', // Place — user fills manually
-      isValid(endDate) ? format(endDate, 'dd/MM/yy') : '',
-      isValid(endDate) ? format(endDate, 'HH:mm') : '',
-      '', // Place — user fills manually
-      '', // Place of stay — user fills manually
-      '0',
-      km.toFixed(1),
-      km.toFixed(1),
-      `₹${amt.toFixed(2)}`,
-    ]
-  })
-
-  // Total Claim row
+  // Total row — colSpan 9 covers everything up to and including Closing
   body.push([
-    { content: 'Total Claim', colSpan: 8, styles: { fontStyle: 'bold', halign: 'right', fillColor: [245, 245, 245] } },
-    { content: totalKm.toFixed(1), styles: { fontStyle: 'bold', halign: 'center', fillColor: [245, 245, 245] } },
-    '', // Rs column (formula-based in Excel, shown as total here)
-    { content: `₹${totalAmt.toFixed(2)}`, styles: { fontStyle: 'bold', halign: 'right', fillColor: [245, 245, 245] } },
+    {
+      content: 'Total Claim',
+      colSpan: 9,
+      styles: { fontStyle: 'bold', halign: 'right', fillColor: [245, 245, 245] },
+    },
+    { content: totalKm.toFixed(1),         styles: { fontStyle: 'bold', halign: 'center', fillColor: [245, 245, 245] } },
+    { content: `₹${totalAmt.toFixed(2)}`,  styles: { fontStyle: 'bold', halign: 'right',  fillColor: [245, 245, 245] } },
   ])
 
   autoTable(doc, {
@@ -161,18 +176,18 @@ export async function printTravelPDF(staffName) {
     head,
     body,
     theme: 'grid',
-    styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
-    headStyles: { textColor: 0, fontStyle: 'bold', fontSize: 7.5 },
+    styles:     { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+    headStyles: { textColor: 0,  fontStyle: 'bold', fontSize: 7.5 },
     columnStyles: {
       0:  { cellWidth: 20 }, // dep date
       1:  { cellWidth: 13 }, // dep time
-      2:  { cellWidth: 30 }, // dep place (blank)
+      2:  { cellWidth: 30 }, // dep place
       3:  { cellWidth: 20 }, // arr date
       4:  { cellWidth: 13 }, // arr time
-      5:  { cellWidth: 30 }, // arr place (blank)
-      6:  { cellWidth: 30 }, // place of stay (blank)
-      7:  { cellWidth: 13 }, // opp
-      8:  { cellWidth: 18 }, // closing
+      5:  { cellWidth: 30 }, // arr place
+      6:  { cellWidth: 30 }, // place of stay
+      7:  { cellWidth: 13 }, // opp    (blank)
+      8:  { cellWidth: 18 }, // closing (blank)
       9:  { cellWidth: 14 }, // km
       10: { cellWidth: 22 }, // rs
     },
@@ -196,24 +211,21 @@ export async function printTravelPDF(staffName) {
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
 
-  // Touring person
   doc.line(margin, sigY, margin + 55, sigY)
   doc.text('TOURING PERSON', margin, sigY + 4)
 
-  // Head of department
   doc.line(margin + 70, sigY, margin + 135, sigY)
   doc.text('HEAD OF DEPARTMENT', margin + 70, sigY + 4)
 
-  // Accounts
   doc.line(margin + 155, sigY, pageW - margin, sigY)
   doc.text('ACCOUNTS DEPTT.', margin + 155, sigY + 4)
 
-  // ── Note about blank fields ──────────────────────────────────────────────────
+  // ── Note ─────────────────────────────────────────────────────────────────────
   doc.setFontSize(7)
   doc.setFont('helvetica', 'italic')
   doc.setTextColor(120)
   doc.text(
-    'Note: "Place" columns (Departure, Arrival, Place of Stay) are to be filled manually before submission.',
+    'Note: "Place" columns (Departure, Arrival, Place of Stay), Opp. and Closing are to be filled manually before submission.',
     margin,
     sigY + 10,
   )
@@ -228,4 +240,89 @@ export async function printTravelPDF(staffName) {
 
   clearPendingJourneys()
   doc.save(`travel-claim_${name}_${from}_to_${to}.pdf`)
+}
+
+// ── Excel generation (fills "TES Exp Format" sheet of the company template) ────
+//
+// Uses ExcelJS so the template is read and written byte-for-byte identically —
+// fonts, borders, merged cells, and all other formatting are untouched.
+// Only these cells are written:
+//   Q5          — report date
+//   C6          — staff name
+//   Rows 11–41  — B (dep date), C (dep time), E (arr date), F (arr time),
+//                 K (km), L (Rs = km×3.25), R (total amount)
+//   Row 42      — K/L/R totals
+
+export async function exportTravelExcel(staffName) {
+  const journeys = getPendingJourneys()
+  if (journeys.length === 0) throw new Error('No journeys queued for export yet.')
+
+  const { rows, totalKm, totalAmt } = journeyRows(journeys)
+
+  // Load the template as an ArrayBuffer
+  const response    = await fetch(TEMPLATE_URL)
+  const arrayBuffer = await response.arrayBuffer()
+
+  // ExcelJS reads the full OOXML structure — every style, font, border, merge
+  // is preserved exactly. Only cells we explicitly set() are changed.
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.load(arrayBuffer)
+
+  // "TES Exp Format" is the third sheet
+  const ws = wb.getWorksheet('TES Exp Format') ?? wb.worksheets[2]
+
+  // Set a cell's value only — style is never touched
+  function write(ref, value) {
+    ws.getCell(ref).value = value
+  }
+
+  // ── Break ALL shared-formula chains before writing ───────────────────────────
+  // The template stores formulas in K (=J-I), L (=K*3.25), R (=Q+O+N+L) as
+  // master+clone chains, and row 42 has SUM formulas across every column
+  // K through R. ExcelJS throws "Shared Formula master must exist above or
+  // left of clone" whenever any cell in a chain is written before all clones
+  // are resolved.
+  // Nulling every formula column (K–R) for all data + total rows breaks every
+  // chain at once without touching cell styles or formatting.
+  const FORMULA_COLS = ['K','L','M','N','O','P','Q','R']
+  for (let r = 11; r <= 42; r++) {
+    FORMULA_COLS.forEach((col) => { ws.getCell(`${col}${r}`).value = null })
+  }
+
+  // ── Header ───────────────────────────────────────────────────────────────────
+  write('Q5', format(new Date(), 'dd/MM/yyyy'))
+  write('C6', staffName ?? '')
+
+  // ── Data rows ────────────────────────────────────────────────────────────────
+  rows.forEach(({ startDate, endDate, km, amt }, idx) => {
+    const r = 11 + idx
+    if (r > 41) return
+
+    write(`B${r}`, isValid(startDate) ? format(startDate, 'dd/MM/yy') : '')
+    write(`C${r}`, isValid(startDate) ? format(startDate, 'HH:mm')    : '')
+    write(`E${r}`, isValid(endDate)   ? format(endDate,   'dd/MM/yy') : '')
+    write(`F${r}`, isValid(endDate)   ? format(endDate,   'HH:mm')    : '')
+    write(`K${r}`, parseFloat(km.toFixed(1)))
+    write(`L${r}`, parseFloat(amt.toFixed(2)))
+  })
+
+  // ── Totals row (row 42 — fixed in template) ───────────────────────────────────
+  write('K42', parseFloat(totalKm.toFixed(1)))
+  write('L42', parseFloat(totalAmt.toFixed(2)))
+
+  // ── Download ──────────────────────────────────────────────────────────────────
+  const first = new Date(journeys[0].startTime)
+  const name  = (staffName ?? 'staff').replace(/\s+/g, '-')
+  const dt    = isValid(first) ? format(first, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')
+
+  const buffer = await wb.xlsx.writeBuffer()
+  const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const url    = URL.createObjectURL(blob)
+  const a      = document.createElement('a')
+  a.href       = url
+  a.download   = `travel-claim_${name}_${dt}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
+
+  clearPendingJourneys()
 }

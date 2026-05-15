@@ -57,10 +57,14 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations using an async engine (required for asyncpg driver)."""
-    # Create the engine directly from settings — bypasses configparser interpolation
+    # Use direct connection (port 5432) for migrations — pgbouncer transaction mode
+    # (port 6543) breaks transactional DDL: tables get committed but alembic_version
+    # update rolls back, leaving the DB in an inconsistent state.
+    migration_url = settings.DIRECT_DATABASE_URL or settings.DATABASE_URL
     connectable = create_async_engine(
-        settings.DATABASE_URL,
+        migration_url,
         poolclass=pool.NullPool,
+        connect_args={"statement_cache_size": 0},
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

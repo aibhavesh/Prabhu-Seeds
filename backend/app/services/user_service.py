@@ -10,11 +10,22 @@ def _hash_password(plain: str) -> str:
     return _bcrypt.hashpw(plain.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 
-async def list_users(db: AsyncSession, skip: int = 0, limit: int = 100, role: str | None = None) -> list[User]:
+async def list_users(
+    db: AsyncSession,
+    skip: int = 0,
+    limit: int = 100,
+    role: str | None = None,
+    visible_ids: list[uuid.UUID] | None = None,
+    exclude_role: str | None = None,
+) -> list[User]:
     q = select(User)
     if role:
         q = q.where(User.role == role.upper())
-    result = await db.execute(q.offset(skip).limit(limit))
+    if visible_ids is not None:
+        q = q.where(User.id.in_(visible_ids))
+    if exclude_role:
+        q = q.where(User.role != exclude_role.upper())
+    result = await db.execute(q.order_by(User.name).offset(skip).limit(limit))
     return list(result.scalars().all())
 
 

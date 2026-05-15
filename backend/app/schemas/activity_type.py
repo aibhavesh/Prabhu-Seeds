@@ -24,7 +24,13 @@ class ActivityTypeUpdate(BaseModel):
 
 class ActivityTypeOut(ActivityTypeBase):
     id: int
+    activity_number: int | None = None
     is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DepartmentOut(BaseModel):
+    name: str
+    activity_count: int

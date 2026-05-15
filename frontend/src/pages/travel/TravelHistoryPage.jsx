@@ -4,12 +4,15 @@ import toast from 'react-hot-toast'
 import apiClient from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/authStore'
+import { useDutyStore } from '@/store/dutyStore'
+import { useCheckIn } from '@/pages/attendance/hooks/useAttendance'
 import { useTravelHistory } from './hooks/useTravel'
 import useTravelJourney from './hooks/useTravelJourney'
 import {
   getPendingJourneys,
   addPendingJourney,
   printTravelPDF,
+  exportTravelExcel,
   RATE_PER_KM,
 } from '@/utils/travelSheet'
 import TravelShell from './components/TravelShell'
@@ -103,14 +106,24 @@ function Timeline({ updates }) {
 }
 
 // ── Journey Tracker ────────────────────────────────────────────────────────────
+// "End Journey" immediately POSTs to the backend — no intermediate "Save" step.
+// This means cache clears, tab kills, and page refreshes can't lose the journey
+// once the user has tapped End: it's already in the database.
+//
+// If the network call fails we keep `failed` state so the user can retry or
+// discard — no data is written to the backend until the retry succeeds.
 
 function JourneyTracker({ user, onJourneyAdded }) {
   const queryClient = useQueryClient()
   const { active, startTime, totalKm, elapsed, gpsError, start, stop } = useTravelJourney()
+  const { checkedIn, checkIn: storeCheckIn } = useDutyStore()
+  const checkInMutation = useCheckIn()
 
-  // Completed journey waiting for "Save" action
-  const [completed, setCompleted] = useState(null)
-  const [saving, setSaving] = useState(false)
+  // `failed` holds journey data only when the auto-save on End Journey errored.
+  // Normal flow: active → (End Journey) → saving → done (no intermediate state).
+  const [failed, setFailed]       = useState(null)
+  const [saving, setSaving]       = useState(false)
+  const [checkingIn, setCheckingIn] = useState(false)
 
   // Pending journeys (accumulated, not yet printed)
   const [pending, setPending] = useState(() => getPendingJourneys())
@@ -118,54 +131,109 @@ function JourneyTracker({ user, onJourneyAdded }) {
 
   const refreshPending = useCallback(() => setPending(getPendingJourneys()), [])
 
-  function handleStart() {
-    setCompleted(null)
+  async function handleStart() {
+    setFailed(null)
+
+    // ── Auto check-in if not already checked in ───────────────────────────────
+    if (!checkedIn) {
+      setCheckingIn(true)
+      try {
+        // Get current position first — check-in requires lat/lng
+        const pos = await new Promise((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15_000,
+          })
+        )
+        const { latitude: lat, longitude: lng } = pos.coords
+
+        // Check in with the backend
+        const record = await checkInMutation.mutateAsync({ lat, lng })
+
+        // Sync the duty store so FieldGpsTracker enables the watcher immediately
+        storeCheckIn(record.check_in ? new Date(record.check_in).getTime() : Date.now())
+
+        // Invalidate attendance-today so FieldGpsTracker picks up the new attendanceId
+        queryClient.invalidateQueries({ queryKey: ['attendance-today'] })
+
+        toast('You weren\'t checked in — we\'ve automatically checked you in for today. Journey is now starting!', {
+          icon: 'ℹ️',
+          duration: 5000,
+        })
+      } catch (err) {
+        const detail = err?.response?.data?.detail ?? err?.message ?? 'Location unavailable'
+        toast.error(`Auto check-in failed — ${detail}. Please check in manually first.`)
+        setCheckingIn(false)
+        return
+      } finally {
+        setCheckingIn(false)
+      }
+    }
+
     start()
     toast.success('Journey started — GPS is tracking.')
   }
 
-  function handleStop() {
-    if (!startTime) return   // guard: can't stop a journey that never started
-    const endTime = Date.now()
-    stop()
-    setCompleted({ startTime, endTime, totalKm })
+  async function saveJourney(data) {
+    const { startTime: st, endTime, totalKm: km } = data
+    const amount  = Math.max(parseFloat((km * RATE_PER_KM).toFixed(2)), 1)
+    const depTime = format(new Date(st), 'HH:mm')
+    const arrTime = format(new Date(endTime), 'HH:mm')
+
+    await apiClient.post('/api/v1/expenses/', {
+      date:          format(new Date(st), 'yyyy-MM-dd'),
+      type:          'travel',
+      description:   `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
+      amount,
+      km:            parseFloat(Math.max(km, 0).toFixed(2)),
+      rate:          RATE_PER_KM,
+      journey_start: new Date(st).toISOString(),
+      journey_end:   new Date(endTime).toISOString(),
+    })
+
+    // Store the actual submitted amount so PDF/Excel use the same value
+    addPendingJourney({ ...data, amount })
+    refreshPending()
+    queryClient.invalidateQueries({ queryKey: ['travel-history'] })
+    onJourneyAdded?.()
   }
 
-  async function handleSave() {
-    if (!completed) return
+  async function handleStop() {
+    if (!startTime) return
+    const endTime = Date.now()
+    stop()                               // clears GPS watch + useTravelJourney state
+    const data = { startTime, endTime, totalKm }
+
     setSaving(true)
     try {
-      const { startTime: st, endTime, totalKm: km } = completed
-      // Use at least ₹1 so backend doesn't reject a zero-amount record
-      const amount  = Math.max(parseFloat((km * RATE_PER_KM).toFixed(2)), 1)
-      const depTime = format(new Date(st), 'HH:mm')
-      const arrTime = format(new Date(endTime), 'HH:mm')
-
-      // Save to backend
-      await apiClient.post('/api/v1/expenses', {
-        date: format(new Date(st), 'yyyy-MM-dd'),
-        type: 'travel',
-        description: `Journey on ${format(new Date(st), 'dd MMM yyyy')} | Dep: ${depTime} → Arr: ${arrTime}`,
-        amount,
-        km: parseFloat(Math.max(km, 0).toFixed(2)),
-        rate: RATE_PER_KM,
-      })
-
-      // Add to local pending list (for sheet accumulation)
-      addPendingJourney(completed)
-      refreshPending()
-      queryClient.invalidateQueries({ queryKey: ['travel-history'] })
-      onJourneyAdded?.()
-
-      toast.success('Journey saved! It will be included in the next sheet print.')
-      setCompleted(null)
+      await saveJourney(data)
+      toast.success('Journey submitted!')
     } catch (err) {
-      const detail = err?.response?.data?.detail ?? err?.message ?? 'Failed to save journey.'
-      toast.error(detail)
+      // Save failed — hold the data so the user can retry
+      setFailed(data)
+      const detail = err?.response?.data?.detail ?? err?.message ?? 'Network error'
+      toast.error(`Could not submit journey — ${detail}. Tap Retry to try again.`)
     } finally {
       setSaving(false)
     }
   }
+
+  async function handleRetry() {
+    if (!failed) return
+    setSaving(true)
+    try {
+      await saveJourney(failed)
+      setFailed(null)
+      toast.success('Journey submitted!')
+    } catch (err) {
+      const detail = err?.response?.data?.detail ?? err?.message ?? 'Network error'
+      toast.error(`Still failing — ${detail}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const [exporting, setExporting] = useState(false)
 
   async function handlePrint() {
     if (pending.length === 0) return
@@ -175,14 +243,28 @@ function JourneyTracker({ user, onJourneyAdded }) {
       refreshPending()
       toast.success('PDF downloaded! Future journeys will go to a new claim.')
     } catch (err) {
-      toast.error(err?.message ?? 'Failed to generate sheet.')
+      toast.error(err?.message ?? 'Failed to generate PDF.')
     } finally {
       setPrinting(false)
     }
   }
 
+  async function handleExcel() {
+    if (pending.length === 0) return
+    setExporting(true)
+    try {
+      await exportTravelExcel(user?.name)
+      refreshPending()
+      toast.success('Excel downloaded! Future journeys will go to a new claim.')
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to generate Excel.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const totalPendingKm  = pending.reduce((sum, j) => sum + j.totalKm, 0)
-  const totalPendingAmt = (totalPendingKm * RATE_PER_KM).toFixed(2)
+  const totalPendingAmt = pending.reduce((sum, j) => sum + (typeof j.amount === 'number' ? j.amount : j.totalKm * RATE_PER_KM), 0)
 
   return (
     <div className="space-y-3">
@@ -211,47 +293,58 @@ function JourneyTracker({ user, onJourneyAdded }) {
               ))}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handlePrint}
-            disabled={printing}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
-          >
-            <span className="material-symbols-outlined text-[16px]">print</span>
-            {printing ? 'Generating…' : 'Print PDF'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={printing || exporting}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+              {printing ? 'Generating…' : 'Download PDF'}
+            </button>
+            <button
+              type="button"
+              onClick={handleExcel}
+              disabled={exporting || printing}
+              className="flex items-center gap-2 px-4 py-2 bg-secondary text-on-secondary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[16px]">table_view</span>
+              {exporting ? 'Exporting…' : 'Download Excel'}
+            </button>
+          </div>
         </div>
       )}
 
-      {/* ── Completed journey — awaiting save ── */}
-      {completed && (
-        <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4 border-l-4 border-primary">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-            Journey Complete — Save to add to current sheet
+      {/* ── Save failed — retry panel ── */}
+      {failed && (
+        <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4 border-l-4 border-error">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-error">
+            Submission Failed — Journey not yet saved
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Stat label="Date"      value={format(new Date(completed.startTime), 'dd MMM yyyy')} />
-            <Stat label="Departure" value={format(new Date(completed.startTime), 'HH:mm')} />
-            <Stat label="Arrival"   value={format(new Date(completed.endTime), 'HH:mm')} />
-            <Stat label="Duration"  value={formatDuration(Math.floor((completed.endTime - completed.startTime) / 1000))} />
-            <Stat label="Distance"  value={`${completed.totalKm.toFixed(2)} km`} highlight />
-            <Stat label="Est. Amount" value={`₹${(completed.totalKm * RATE_PER_KM).toFixed(2)}`} />
+            <Stat label="Date"      value={format(new Date(failed.startTime), 'dd MMM yyyy')} />
+            <Stat label="Departure" value={format(new Date(failed.startTime), 'HH:mm')} />
+            <Stat label="Arrival"   value={format(new Date(failed.endTime), 'HH:mm')} />
+            <Stat label="Duration"  value={formatDuration(Math.floor((failed.endTime - failed.startTime) / 1000))} />
+            <Stat label="Distance"  value={`${failed.totalKm.toFixed(2)} km`} highlight />
+            <Stat label="Est. Amount" value={`₹${(failed.totalKm * RATE_PER_KM).toFixed(2)}`} />
           </div>
           <p className="text-xs text-on-surface-variant">
-            Place of departure, arrival, and place of stay will be filled manually in the sheet.
+            Check your connection then tap Retry. Tap Discard only if you want to abandon this journey.
           </p>
           <div className="flex gap-2 flex-wrap">
             <button
               type="button"
-              onClick={handleSave}
+              onClick={handleRetry}
               disabled={saving}
               className="px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save Journey'}
+              {saving ? 'Retrying…' : 'Retry'}
             </button>
             <button
               type="button"
-              onClick={() => setCompleted(null)}
+              onClick={() => setFailed(null)}
               className="px-4 py-2 bg-surface-container-low text-on-surface-variant text-xs font-bold uppercase tracking-widest"
             >
               Discard
@@ -261,7 +354,7 @@ function JourneyTracker({ user, onJourneyAdded }) {
       )}
 
       {/* ── Active journey ── */}
-      {active && !completed && (
+      {active && !failed && (
         <div className="bg-surface-container-lowest shadow-ghost p-4 space-y-4">
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -278,30 +371,40 @@ function JourneyTracker({ user, onJourneyAdded }) {
           <button
             type="button"
             onClick={handleStop}
-            className="px-4 py-2 bg-error text-white text-xs font-bold uppercase tracking-widest"
+            disabled={saving}
+            className="px-4 py-2 bg-error text-white text-xs font-bold uppercase tracking-widest disabled:opacity-60"
           >
-            End Journey
+            {saving ? 'Submitting…' : 'End Journey'}
           </button>
         </div>
       )}
 
-      {/* ── Idle — no active journey, no completed one ── */}
-      {!active && !completed && (
+      {/* ── Idle — no active journey, no failed save ── */}
+      {!active && !failed && (
         <div className="bg-surface-container-lowest shadow-ghost p-4 flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-sm font-bold text-on-surface">Start a Journey</p>
             <p className="text-xs text-on-surface-variant mt-0.5">
               GPS tracks your distance. Each journey is added to the current sheet until you print.
             </p>
+            {!checkedIn && (
+              <p className="text-xs text-amber-600 font-semibold mt-1">
+                Not checked in — tapping Start will check you in automatically.
+              </p>
+            )}
             {gpsError && <p className="text-xs text-error font-semibold mt-1">{gpsError}</p>}
           </div>
           <button
             type="button"
             onClick={handleStart}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest"
+            disabled={checkingIn}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary text-xs font-bold uppercase tracking-widest disabled:opacity-60"
           >
-            <span className="material-symbols-outlined text-[16px]">play_arrow</span>
-            Start Journey
+            {checkingIn
+              ? <span className="h-3.5 w-3.5 rounded-full border-2 border-on-primary border-t-transparent animate-spin" />
+              : <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+            }
+            {checkingIn ? 'Checking in…' : 'Start Journey'}
           </button>
         </div>
       )}
