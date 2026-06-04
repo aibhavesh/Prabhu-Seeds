@@ -76,6 +76,9 @@ export default function DashboardShell({
         <div className="px-5 py-5 border-b border-outline-variant/20">
           <p className="text-base font-black font-headline text-primary uppercase tracking-tight">{brandTitle}</p>
           <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-on-surface-variant/70">{brandSubtitle}</p>
+          <span className="mt-2 inline-block text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/40 bg-surface-container px-1.5 py-0.5">
+            v{__APP_VERSION__}
+          </span>
         </div>
 
         {/* Nav links — built from role, never hardcoded */}
@@ -108,6 +111,7 @@ export default function DashboardShell({
 
       {/* ── Mobile top nav ─────────────────────────────────────────────────── */}
       <div className="lg:hidden border-b border-outline-variant/25 bg-surface-container-low px-4 py-2 flex items-center gap-2 overflow-x-auto">
+        <span className="text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/40 mr-1 flex-shrink-0">v{__APP_VERSION__}</span>
         {navItems.map((item) => (
           <NavLink
             key={item.label}

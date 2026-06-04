@@ -368,7 +368,7 @@ export default function PlatformSettingsPage() {
             {/* About */}
             <article className="bg-surface-container-lowest p-4">
               <h3 className="text-xl font-black font-headline">About Platform</h3>
-              <p className="text-sm text-on-surface-variant mt-2">PGA AgriTask v2.4.1</p>
+              <p className="text-sm text-on-surface-variant mt-2">PGA AgriTask v{__APP_VERSION__}</p>
               <div className="mt-4 space-y-2 text-sm text-on-surface">
                 <button type="button" className="block hover:text-primary">Privacy Policy</button>
                 <button type="button" className="block hover:text-primary">Terms of Service</button>
