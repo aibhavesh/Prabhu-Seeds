@@ -18,7 +18,6 @@ class User(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)  # OWNER|MANAGER|FIELD|ACCOUNTS
     manager_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     state: Mapped[str | None] = mapped_column(String, nullable=True)
-    hq: Mapped[str | None] = mapped_column(String, nullable=True)
     mobile: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     ppk_rate: Mapped[Decimal | None] = mapped_column(Numeric(4, 1), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))

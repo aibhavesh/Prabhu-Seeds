@@ -11,15 +11,12 @@ function normalizeRows(payload) {
   return rows.map((row, idx) => ({
     user_id: row.user_id ?? row.id ?? `user-${idx}`,
     name: row.name ?? row.staff_name ?? 'Unknown',
-    department: row.department ?? 'Marketing',
-    state: row.state ?? row.region ?? '--',
-    assigned_state: row.assigned_state ?? row.assignedState ?? row.state ?? '--',
+    department: row.department ?? 'Field Ops',
+    state: row.state ?? row.region ?? '—',
     lat: Number(row.lat ?? row.latitude),
     lng: Number(row.lng ?? row.longitude),
-    accuracy: Number(row.accuracy ?? row.gps_accuracy ?? 0),
+    accuracy: row.accuracy != null ? Number(row.accuracy) : null,
     last_seen: row.last_seen ?? row.timestamp ?? row.created_at ?? null,
-    current_location: row.current_location ?? row.location_name ?? null,
-    outside_state: Boolean(row.outside_state ?? row.is_outside_state ?? false),
   }))
 }
 

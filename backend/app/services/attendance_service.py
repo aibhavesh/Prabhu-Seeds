@@ -124,8 +124,10 @@ async def check_out(user_id: uuid.UUID, data: CheckOutRequest, db: AsyncSession)
     )
     if len(all_wps) >= 2:
         coords = [(float(w.lat), float(w.lng)) for w in all_wps]
-        # Only count legs >= 100 m — filters GPS drift from stationary heartbeats
-        computed_km = calculate_route_km(coords, min_leg_m=100)
+        # Filter legs < 10 m only — eliminates pure GPS jitter while counting
+        # all real movement. The watcher now uses cumulative-distance gating
+        # (50 m threshold) so waypoints already represent real path segments.
+        computed_km = calculate_route_km(coords, min_leg_m=10)
     else:
         computed_km = 0.0
 

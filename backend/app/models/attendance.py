@@ -31,6 +31,7 @@ class GpsWaypoint(Base):
     attendance_id: Mapped[int] = mapped_column(Integer, ForeignKey("attendance.id", ondelete="CASCADE"))
     lat: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
     lng: Mapped[Decimal] = mapped_column(Numeric(10, 7), nullable=False)
+    accuracy: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     stop_label: Mapped[str | None] = mapped_column(String, nullable=True)
     type: Mapped[str | None] = mapped_column(String, nullable=True)  # checkin|checkout|stop|break

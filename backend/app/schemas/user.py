@@ -10,7 +10,6 @@ class UserBase(BaseModel):
     email: str | None = None
     role: str
     state: str | None = None
-    hq: str | None = None
     mobile: str
     ppk_rate: Decimal | None = None
     manager_id: uuid.UUID | None = None
@@ -26,7 +25,6 @@ class UserUpdate(BaseModel):
     email: str | None = None
     role: str | None = None
     state: str | None = None
-    hq: str | None = None
     ppk_rate: Decimal | None = None
     manager_id: uuid.UUID | None = None
     is_active: bool | None = None

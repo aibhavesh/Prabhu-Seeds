@@ -35,8 +35,7 @@ async def live_positions(
 ) -> dict:
     """
     Return all field staff currently checked in (check_in set, check_out NULL today).
-    State is determined by reverse-geocoding the employee's latest GPS waypoint —
-    no hardcoded state assignment on the user profile.
+    State is determined by reverse-geocoding the employee's latest GPS waypoint.
     """
     today = _date.today()
 
@@ -55,18 +54,17 @@ async def live_positions(
     result = await db.execute(stmt)
     records = result.scalars().all()
 
-    # Role + active filter in Python (avoids double-JOIN bug with async SQLAlchemy)
+    # Role + active filter
     records = [
         r for r in records
         if r.user and r.user.role.upper() in ("FIELD", "MANAGER") and r.user.is_active
     ]
 
     if current_user.role.upper() == "MANAGER":
-        # Compare as strings to avoid UUID type mismatch between asyncpg UUID objects
         mgr_id_str = str(current_user.id)
         records = [r for r in records if str(r.user.manager_id) == mgr_id_str]
 
-    # Build base employee dicts and collect GPS coords for concurrent geocoding
+    # Build base employee dicts
     raw = []
     for record in records:
         waypoints = sorted(record.waypoints, key=lambda w: w.timestamp, reverse=True)
@@ -74,6 +72,7 @@ async def live_positions(
 
         lat = float(latest_wp.lat) if latest_wp else 0.0
         lng = float(latest_wp.lng) if latest_wp else 0.0
+        accuracy = float(latest_wp.accuracy) if (latest_wp and latest_wp.accuracy is not None) else None
         last_seen = (
             latest_wp.timestamp.isoformat()
             if latest_wp
@@ -86,11 +85,11 @@ async def live_positions(
             "department": DEPT_LABEL.get(record.user.role, record.user.role.title()),
             "lat":        lat,
             "lng":        lng,
+            "accuracy":   accuracy,
             "last_seen":  last_seen,
-            "current_location": record.user.hq,
         })
 
-    # Reverse-geocode all employees concurrently (cached after first call per location)
+    # Reverse-geocode all employees concurrently
     states = await asyncio.gather(
         *[reverse_geocode_state(e["lat"], e["lng"]) for e in raw]
     )
@@ -98,13 +97,9 @@ async def live_positions(
     employees = [
         {
             **e,
-            "state":          state or "—",
-            "assigned_state": state or "—",
-            "accuracy":       0,
-            "outside_state":  False,
+            "state": state or "—",
         }
         for e, state in zip(raw, states)
-        # Skip employees whose only recorded position is (0, 0) — GPS was unavailable
         if not (e["lat"] == 0.0 and e["lng"] == 0.0)
     ]
 

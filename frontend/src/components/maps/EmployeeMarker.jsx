@@ -99,10 +99,14 @@ export default function EmployeeMarker({ employee, onClick }) {
 
     maps.event.clearListeners(markerRef.current, 'click')
     markerRef.current.addListener('click', () => {
+      const accuracyLine = employee?.accuracy != null
+        ? `<p style="margin:2px 0 0 0;font-size:11px;color:#40493d;">GPS accuracy: ±${Math.round(employee.accuracy)} m</p>`
+        : ''
       const content = `
         <div style="min-width:170px;padding:4px 2px;font-family:Inter,sans-serif;">
           <p style="margin:0 0 4px 0;font-size:14px;font-weight:700;color:#181d1b;">${markerTitle}</p>
           <p style="margin:0;font-size:12px;color:#40493d;">Last updated ${lastSeenLabel}</p>
+          ${accuracyLine}
         </div>
       `
       infoWindowRef.current.setContent(content)

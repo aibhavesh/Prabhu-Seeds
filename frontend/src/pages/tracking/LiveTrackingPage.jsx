@@ -53,17 +53,6 @@ function summaryCounts(employees) {
   )
 }
 
-function GeofenceBanner({ alerts }) {
-  if (!alerts.length) return null
-  const first = alerts[0]
-  return (
-    <div className="bg-amber-500/20 border-b border-amber-500/40 px-4 py-2 text-amber-900 text-sm font-medium">
-      Geofence Alert: {first.name} is outside assigned state near{' '}
-      {first.current_location ?? `${first.lat.toFixed(3)}, ${first.lng.toFixed(3)}`}.
-    </div>
-  )
-}
-
 function StatusBadge({ employee }) {
   return (
     <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest ${
@@ -233,13 +222,6 @@ export default function LiveTrackingPage() {
 
   const summary = useMemo(() => summaryCounts(employees), [employees])
 
-  const geofenceAlerts = useMemo(
-    () => employees.filter(
-      (e) => e.outside_state || (e.assigned_state && e.state && e.assigned_state !== e.state && e.state !== '—'),
-    ),
-    [employees],
-  )
-
   // Pan map when state filter changes; also clear stale filter if state leaves the live list
   useEffect(() => {
     if (!stateFilter) return
@@ -270,8 +252,6 @@ export default function LiveTrackingPage() {
 
   return (
     <DashboardShell>
-      <GeofenceBanner alerts={geofenceAlerts} />
-
       {/* Top bar */}
       <div className="bg-surface-container-lowest border-b border-outline-variant/20 px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-4 flex-wrap">

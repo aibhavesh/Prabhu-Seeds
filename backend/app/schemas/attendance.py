@@ -20,6 +20,7 @@ class WaypointCreate(BaseModel):
     attendance_id: int
     lat: Decimal
     lng: Decimal
+    accuracy: Decimal | None = None
     timestamp: datetime
     stop_label: str | None = None
     type: str = "stop"
