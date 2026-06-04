@@ -63,7 +63,6 @@ async def field_users_workload(
             "id": str(u.id),
             "name": u.name,
             "mobile": u.mobile,
-            "hq": u.hq,
             "state": u.state,
             "active_tasks": sc_map.get(str(u.id), 0) + gc_map.get(str(u.id), 0),
         }
