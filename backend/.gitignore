@@ -1,3 +1,6 @@
+# Seed hash — local state file, not committed
+app/services/.seed_hash
+
 # Python
 __pycache__/
 *.py[cod]
