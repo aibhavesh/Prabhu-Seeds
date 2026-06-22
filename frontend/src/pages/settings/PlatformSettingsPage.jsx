@@ -38,7 +38,10 @@ const schema = z.object({
   email:      z.string().email('Enter a valid email').or(z.literal('')).optional(),
   password:   z.string().min(6, 'Password must be at least 6 characters'),
   role:       z.enum(['MANAGER', 'FIELD'], { required_error: 'Select a role' }),
-  manager_id: z.string().uuid('Select a valid manager').optional().nullable(),
+  manager_id: z.preprocess(
+    (val) => (val === '' || val == null ? null : val),
+    z.string().uuid('Select a valid manager').nullable().optional()
+  ),
 }).superRefine((val, ctx) => {
   if (val.role === 'FIELD' && !val.manager_id) {
     ctx.addIssue({
